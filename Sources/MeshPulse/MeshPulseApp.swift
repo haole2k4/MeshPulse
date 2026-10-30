@@ -5,7 +5,14 @@ import SwiftUI
 struct MeshPulseApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @State private var coordinator: MeshCoordinator = {
-        #if canImport(MultipeerConnectivity)
+        #if canImport(MultipeerConnectivity) && canImport(CryptoKit) && canImport(Security) && canImport(CoreLocation)
+        return MeshCoordinator(
+            startInMockMode: true,
+            transport: MultipeerTransport(),
+            sealer: CryptoKitSealer.loadOrCreate(),
+            locationProvider: LocationProvider()
+        )
+        #elseif canImport(MultipeerConnectivity)
         return MeshCoordinator(startInMockMode: true, transport: MultipeerTransport())
         #else
         return MeshCoordinator(startInMockMode: true)

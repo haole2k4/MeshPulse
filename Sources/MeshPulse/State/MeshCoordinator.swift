@@ -3,6 +3,7 @@ import Foundation
 import MeshCore
 import Observation
 import SwiftUI
+import os
 
 // MARK: - Platform Adapter Seams (Phase 3 & Phase 4 Ready)
 
@@ -182,6 +183,9 @@ public final class MeshCoordinator {
     private var liveFallbackSealer: SimulatedEnvelopeSealer
     private var liveBroadcastMessages: [ChatThreadItem] = []
     private var livePacketLogs: [PacketLogEntry] = []
+    private let dtnStore: DiskDTNStore?
+    private var lastPersistedState: PersistedMeshState?
+    private let persistenceLogger = Logger(subsystem: "com.haole2k4.MeshPulse", category: "DiskDTNStore")
 
     private var liveTransport: (any MeshTransportAdapter)?
     private var liveSealer: (any EnvelopeSealer)?
@@ -195,6 +199,7 @@ public final class MeshCoordinator {
         transport: (any MeshTransportAdapter)? = nil,
         sealer: (any EnvelopeSealer)? = nil,
         locationProvider: (any OfflineLocationProviding)? = nil,
+        dtnStore: DiskDTNStore? = DiskDTNStore.defaultStore(),
         defaults: UserDefaults = .standard
     ) {
         let resolvedNodeID: String
@@ -224,6 +229,7 @@ public final class MeshCoordinator {
         self.liveTransport = transport
         self.liveSealer = sealer
         self.locationProvider = locationProvider
+        self.dtnStore = dtnStore
 
         let fallbackSealer = SimulatedEnvelopeSealer(seed: resolvedNodeID)
         self.liveFallbackSealer = fallbackSealer
@@ -234,7 +240,13 @@ public final class MeshCoordinator {
             displayName: resolvedDisplayName,
             publicKeyBase64: effectiveLivePubKey
         )
-        self.liveRouter = MeshRouter(localIdentity: liveIdentity)
+        var initialLiveRouter = MeshRouter(localIdentity: liveIdentity)
+        if let dtnStore {
+            let persisted = dtnStore.load()
+            initialLiveRouter.restorePersistedState(persisted)
+        }
+        self.liveRouter = initialLiveRouter
+        self.lastPersistedState = initialLiveRouter.snapshotPersistedState()
         self.mockNetwork = SimulatedMeshNetwork(
             nodeSpecs: [
                 (SimulatedMeshNetwork.nodeAID, resolvedDisplayName, "seed-iphone-a"),
@@ -284,7 +296,11 @@ public final class MeshCoordinator {
     }
 
     public func handleScenePhase(_ phase: ScenePhase) {
-        guard phase == .active, !isMockMode, isRadioEnabled else { return }
+        if phase != .active {
+            persistLiveMeshStateIfNeeded()
+            return
+        }
+        guard !isMockMode, isRadioEnabled else { return }
         activateLiveTransportIfAvailable()
         let effects = liveRouter.broadcastHeartbeat()
         processLiveEffects(effects)
@@ -569,6 +585,7 @@ public final class MeshCoordinator {
         } else {
             liveRouter.resetTelemetry()
             livePacketLogs.removeAll()
+            persistLiveMeshStateIfNeeded()
         }
     }
 
@@ -1204,6 +1221,19 @@ public final class MeshCoordinator {
         }
 
         appendPulses(newPulses)
+        persistLiveMeshStateIfNeeded()
+    }
+
+    private func persistLiveMeshStateIfNeeded() {
+        guard let dtnStore else { return }
+        let snapshot = liveRouter.snapshotPersistedState()
+        guard snapshot != lastPersistedState else { return }
+        do {
+            try dtnStore.save(snapshot)
+            lastPersistedState = snapshot
+        } catch {
+            persistenceLogger.warning("Failed to save live mesh state: \(error.localizedDescription)")
+        }
     }
 
     private func appendPulses(_ pulses: [ActivePacketPulse]) {
