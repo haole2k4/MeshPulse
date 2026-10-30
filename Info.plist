@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>MeshPulse sử dụng mạng cục bộ ngang hàng (Wi-Fi Direct / AWDL) để khám phá và chuyển tiếp tin nhắn ngoại tuyến tới các iPhone xung quanh.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_meshpulse._tcp</string>
+		<string>_meshpulse._udp</string>
+	</array>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>MeshPulse sử dụng Bluetooth để tự động khám phá các nút trong mạng lưới ngoại tuyến.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>MeshPulse đính kèm tọa độ GPS ngoại tuyến khi bạn chia sẻ vị trí hoặc phát tín hiệu khẩn cấp SOS.</string>
+	<key>UILaunchScreen</key>
+	<dict/>
+</dict>
+</plist>

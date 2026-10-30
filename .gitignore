@@ -12,3 +12,6 @@ DerivedData/
 *.app
 *.dSYM.zip
 *.dSYM
+
+# Agent workspace state
+.agy/

@@ -18,7 +18,15 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "MeshPulse"
+            name: "MeshCore"
+        ),
+        .target(
+            name: "MeshPulse",
+            dependencies: ["MeshCore"]
+        ),
+        .testTarget(
+            name: "MeshCoreTests",
+            dependencies: ["MeshCore"]
         ),
     ]
 )

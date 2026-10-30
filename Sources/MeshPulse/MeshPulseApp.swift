@@ -1,3 +1,4 @@
+#if canImport(SwiftUI)
 import SwiftUI
 
 @main
@@ -8,3 +9,8 @@ struct MeshPulseApp: App {
         }
     }
 }
+#else
+import MeshCore
+
+public enum MeshPulsePlatformStub: Sendable {}
+#endif
