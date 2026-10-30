@@ -200,6 +200,34 @@ public struct SimulatedMeshNetwork: Sendable {
         }
     }
 
+    public mutating func updateNodeDisplayName(
+        _ displayName: String,
+        for nodeID: String,
+        settle: Bool = true
+    ) {
+        guard nodesByID[nodeID] != nil else { return }
+        let effects = nodesByID[nodeID]!.router.updateLocalProfile(
+            displayName: displayName,
+            now: currentTime
+        )
+        if let updatedIdentity = nodesByID[nodeID]?.identity {
+            for otherID in orderedNodeIDs where otherID != nodeID {
+                nodesByID[otherID]?.router.registerPeerIdentity(updatedIdentity)
+            }
+        }
+        processEffects(effects, on: nodeID)
+        if settle {
+            runUntilQuiescent()
+        }
+    }
+
+    public mutating func resetTelemetry() {
+        for id in orderedNodeIDs {
+            nodesByID[id]?.router.resetTelemetry()
+            nodesByID[id]?.packetLogs.removeAll()
+        }
+    }
+
     public mutating func addPhysicalLink(
         _ nodeA: String,
         _ nodeB: String,

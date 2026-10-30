@@ -3,9 +3,12 @@ import SwiftUI
 
 @main
 struct MeshPulseApp: App {
+    @State private var coordinator = MeshCoordinator()
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(coordinator: coordinator)
+                .preferredColorScheme(.dark)
         }
     }
 }

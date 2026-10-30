@@ -501,5 +501,12 @@ struct MeshRouterTests {
         #expect(profileEffects.contains { if case let .transmit(_, pkt, _) = $0 { return pkt.type == .heartbeat }; return false })
         routerC.resetTelemetry()
         #expect(routerC.telemetry == TelemetrySnapshot())
+
+        var sim = SimulatedMeshNetwork()
+        sim.updateNodeDisplayName("Trạm-A", for: SimulatedMeshNetwork.nodeAID)
+        #expect(sim.node(SimulatedMeshNetwork.nodeAID)?.identity.displayName == "Trạm-A")
+        sim.resetTelemetry()
+        #expect(sim.node(SimulatedMeshNetwork.nodeAID)?.router.telemetry == TelemetrySnapshot())
+        #expect(sim.node(SimulatedMeshNetwork.nodeAID)?.packetLogs.isEmpty == true)
     }
 }
