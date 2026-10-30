@@ -187,6 +187,7 @@ public final class MeshCoordinator {
     private var liveSealer: (any EnvelopeSealer)?
     private var locationProvider: (any OfflineLocationProviding)?
     private var transportStreamTask: Task<Void, Never>?
+    private var heartbeatTask: Task<Void, Never>?
     private var pulseCleanupTask: Task<Void, Never>?
 
     public init(
@@ -263,12 +264,16 @@ public final class MeshCoordinator {
         locationProvider: (any OfflineLocationProviding)? = nil
     ) {
         if let transport {
+            stopLiveRuntime(stopAdapter: true)
             self.liveTransport = transport
         }
         if let sealer {
             self.liveSealer = sealer
             let effects = liveRouter.updateLocalProfile(publicKeyBase64: sealer.publicKeyBase64)
-            processLiveEffects(effects)
+            if !isMockMode {
+                liveTransport?.updateLocalIdentity(liveRouter.localIdentity)
+                processLiveEffects(effects)
+            }
         }
         if let locationProvider {
             self.locationProvider = locationProvider
@@ -276,6 +281,13 @@ public final class MeshCoordinator {
         if !isMockMode, isRadioEnabled {
             activateLiveTransportIfAvailable()
         }
+    }
+
+    public func handleScenePhase(_ phase: ScenePhase) {
+        guard phase == .active, !isMockMode, isRadioEnabled else { return }
+        activateLiveTransportIfAvailable()
+        let effects = liveRouter.broadcastHeartbeat()
+        processLiveEffects(effects)
     }
 
     // MARK: - Computed Read Models for 4 Tabs
@@ -497,7 +509,8 @@ public final class MeshCoordinator {
             if isRadioEnabled {
                 activateLiveTransportIfAvailable()
             } else {
-                liveTransport?.stop()
+                stopLiveRuntime(stopAdapter: true)
+                radioStatusNote = "Đã tạm tắt sóng ngoại tuyến"
                 let effects = liveRouter.updateDirectPeers([])
                 processLiveEffects(effects)
             }
@@ -512,12 +525,13 @@ public final class MeshCoordinator {
         selectedDirectPeerID = nil
 
         if enabled {
-            liveTransport?.stop()
-            transportStreamTask?.cancel()
-            transportStreamTask = nil
+            stopLiveRuntime(stopAdapter: true)
         } else {
             if isRadioEnabled {
                 activateLiveTransportIfAvailable()
+            } else {
+                stopLiveRuntime(stopAdapter: true)
+                radioStatusNote = "Đã tạm tắt sóng ngoại tuyến"
             }
         }
     }
@@ -1038,19 +1052,48 @@ public final class MeshCoordinator {
 
     private func activateLiveTransportIfAvailable() {
         guard let liveTransport else {
-            radioStatusNote = "Chưa gắn MultipeerTransport (sẵn sàng cho Phase 3)"
+            radioStatusNote = "Chưa gắn MultipeerTransport"
             return
         }
 
-        transportStreamTask?.cancel()
-        liveTransport.start(localIdentity: liveRouter.localIdentity)
-        let stream = liveTransport.events
-
-        transportStreamTask = Task { @MainActor [weak self] in
-            for await event in stream {
-                guard let self, !self.isMockMode else { break }
-                self.handleLiveTransportEvent(event)
+        if transportStreamTask == nil {
+            let stream = liveTransport.events
+            transportStreamTask = Task { @MainActor [weak self] in
+                for await event in stream {
+                    guard let self, !self.isMockMode else { break }
+                    self.handleLiveTransportEvent(event)
+                }
+                if !Task.isCancelled {
+                    self?.transportStreamTask = nil
+                }
             }
+        }
+
+        liveTransport.start(localIdentity: liveRouter.localIdentity)
+        startLiveHeartbeatLoopIfNeeded()
+    }
+
+    private func startLiveHeartbeatLoopIfNeeded() {
+        guard heartbeatTask == nil else { return }
+        heartbeatTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(15))
+                guard let self, !Task.isCancelled, !self.isMockMode, self.isRadioEnabled else {
+                    break
+                }
+                let effects = self.liveRouter.broadcastHeartbeat()
+                self.processLiveEffects(effects)
+            }
+        }
+    }
+
+    private func stopLiveRuntime(stopAdapter: Bool) {
+        heartbeatTask?.cancel()
+        heartbeatTask = nil
+        transportStreamTask?.cancel()
+        transportStreamTask = nil
+        if stopAdapter {
+            liveTransport?.stop()
         }
     }
 
