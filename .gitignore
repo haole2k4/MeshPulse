@@ -1,0 +1,14 @@
+.DS_Store
+/.build
+/Packages
+xcuserdata/
+DerivedData/
+.swiftpm/
+.netrc
+
+# xtool build & signing artifacts
+/xtool
+*.ipa
+*.app
+*.dSYM.zip
+*.dSYM
