@@ -33,13 +33,13 @@ public struct DirectMessagesTab: View {
                         conversationsListSection
                             .padding(.horizontal, 16)
                             .padding(.top, 12)
-                            .padding(.bottom, 28)
+                            .padding(.bottom, 32)
 
                     case .dtnOutbox:
                         dtnOutboxSection
                             .padding(.horizontal, 16)
                             .padding(.top, 12)
-                            .padding(.bottom, 28)
+                            .padding(.bottom, 32)
                     }
                 }
             }
@@ -99,12 +99,15 @@ public struct DirectMessagesTab: View {
             .sensoryFeedback(.selection, trigger: selectedSegment)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(MeshTheme.cardSurface.opacity(0.8))
+        .padding(.vertical, 8)
+        .background {
+            MeshTheme.background.opacity(0.85)
+                .background(.ultraThinMaterial)
+        }
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(MeshTheme.hairlineBorder)
-                .frame(height: 1)
+                .frame(height: 0.8)
         }
     }
 
@@ -114,9 +117,9 @@ public struct DirectMessagesTab: View {
         let items = coordinator.directConversationPeers
         return VStack(alignment: .leading, spacing: 12) {
             if items.isEmpty {
-                VStack(spacing: 10) {
+                VStack(spacing: 12) {
                     Image(systemName: "lock.shield.fill")
-                        .font(.title2.weight(.semibold))
+                        .font(.system(size: 32, weight: .semibold))
                         .foregroundStyle(MeshTheme.p2pGreen)
 
                     Text("Chưa có trạm để trò chuyện 1-1")
@@ -128,7 +131,7 @@ public struct DirectMessagesTab: View {
                         .foregroundStyle(MeshTheme.secondaryText)
                         .multilineTextAlignment(.center)
                 }
-                .padding(22)
+                .padding(26)
                 .frame(maxWidth: .infinity)
                 .meshCard()
             } else {
@@ -136,7 +139,7 @@ public struct DirectMessagesTab: View {
                     NavigationLink(value: peer.id) {
                         conversationRow(peer)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.applePressable)
                 }
             }
         }
@@ -146,58 +149,69 @@ public struct DirectMessagesTab: View {
         let thread = coordinator.messages(forPeerID: peer.id)
         let lastMessage = thread.last
 
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 8) {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "lock.shield.fill")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(MeshTheme.p2pGreen)
-                        Text(peer.identity.displayName)
-                            .font(.headline)
-                            .foregroundStyle(MeshTheme.primaryText)
+        return HStack(alignment: .center, spacing: 12) {
+            // Station Avatar with Link indicator
+            ZStack {
+                Circle()
+                    .fill(MeshTheme.elevatedSurface)
+                    .frame(width: 44, height: 44)
+
+                Text(String(peer.identity.displayName.prefix(1)).uppercased())
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(MeshTheme.color(for: peer.linkKind))
+
+                Circle()
+                    .fill(MeshTheme.color(for: peer.linkKind))
+                    .frame(width: 10, height: 10)
+                    .overlay(Circle().stroke(MeshTheme.cardSurface, lineWidth: 2))
+                    .offset(x: 15, y: 15)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(peer.identity.displayName)
+                        .font(.headline)
+                        .foregroundStyle(MeshTheme.primaryText)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 6)
+
+                    if let lastMessage {
+                        Text(lastMessage.timestamp, format: .dateTime.hour().minute())
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(MeshTheme.secondaryText)
+                    } else {
+                        LinkStatusBadge(linkKind: peer.linkKind)
+                    }
+                }
+
+                HStack(alignment: .center, spacing: 4) {
+                    if let lastMessage {
+                        if lastMessage.isEncrypted {
+                            Image(systemName: "lock.fill")
+                                .font(.caption2)
+                                .foregroundStyle(MeshTheme.p2pGreen)
+                        }
+                        Text(lastMessage.isOutgoing ? "Bạn: \(lastMessage.text)" : lastMessage.text)
+                            .font(.subheadline)
+                            .foregroundStyle(MeshTheme.secondaryText)
+                            .lineLimit(1)
+                    } else {
+                        Text("Nhắn tin mã hóa E2EE (hỗ trợ DTN ngoại tuyến)")
+                            .font(.caption)
+                            .foregroundStyle(MeshTheme.secondaryText)
                             .lineLimit(1)
                     }
 
-                    Text(peer.identity.nodeID)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(MeshTheme.secondaryText)
-                }
+                    Spacer(minLength: 4)
 
-                Spacer(minLength: 8)
-
-                LinkStatusBadge(linkKind: peer.linkKind)
-            }
-
-            HStack(alignment: .bottom, spacing: 8) {
-                if let lastMessage {
-                    Text(lastMessage.isOutgoing ? "Bạn: \(lastMessage.text)" : lastMessage.text)
-                        .font(.subheadline)
-                        .foregroundStyle(MeshTheme.secondaryText)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-
-                    Spacer(minLength: 6)
-
-                    Text(lastMessage.timestamp, format: .dateTime.hour().minute())
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(MeshTheme.secondaryText)
-                } else {
-                    Text("Chạm để nhắn tin mã hóa đầu-cuối (hỗ trợ lưu chờ DTN khi khuất sóng)")
-                        .font(.caption)
-                        .foregroundStyle(MeshTheme.secondaryText)
-                        .multilineTextAlignment(.leading)
-
-                    Spacer(minLength: 6)
-
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(MeshTheme.secondaryText)
+                    if lastMessage != nil {
+                        LinkStatusBadge(linkKind: peer.linkKind)
+                    }
                 }
             }
         }
         .padding(14)
-        .frame(minHeight: MeshTheme.minTapDimension)
         .meshCard()
         .contentShape(Rectangle())
     }
@@ -208,7 +222,7 @@ public struct DirectMessagesTab: View {
         let records = coordinator.dtnRecords
         return VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label("Chiến lược: \(coordinator.routingStrategy.title)", systemImage: "tray.and.arrow.up.fill")
+                Label("Chiến lược: \(coordinator.routingStrategy.title)", systemImage: coordinator.routingStrategy.systemImage)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(MeshTheme.dtnIndigo)
 
@@ -221,9 +235,9 @@ public struct DirectMessagesTab: View {
             .padding(.horizontal, 4)
 
             if records.isEmpty {
-                VStack(spacing: 10) {
+                VStack(spacing: 12) {
                     Image(systemName: "tray.fill")
-                        .font(.title2.weight(.semibold))
+                        .font(.system(size: 32, weight: .semibold))
                         .foregroundStyle(MeshTheme.dtnIndigo)
 
                     Text("Hộp thư chờ DTN đang trống")
@@ -235,7 +249,7 @@ public struct DirectMessagesTab: View {
                         .foregroundStyle(MeshTheme.secondaryText)
                         .multilineTextAlignment(.center)
                 }
-                .padding(22)
+                .padding(26)
                 .frame(maxWidth: .infinity)
                 .meshCard()
             } else {
@@ -269,13 +283,13 @@ public struct DirectMessagesTab: View {
 
                 Spacer(minLength: 4)
 
-                Text(record.packet.targetID)
+                Text(record.packet.targetID.prefix(12) + "…")
                     .font(.caption2.monospaced())
                     .foregroundStyle(MeshTheme.secondaryText)
             }
 
             HStack(spacing: 12) {
-                dtnMetricPill(label: "Bản sao", value: "\(record.packet.remainingCopies)")
+                dtnMetricPill(label: "Bản sao", value: "L=\(record.packet.remainingCopies)")
                 dtnMetricPill(label: "TTL", value: "\(record.packet.ttl)")
                 dtnMetricPill(label: "Đã trao", value: "\(record.forwardedPeers.count) trạm")
             }
@@ -299,7 +313,7 @@ public struct DirectMessagesTab: View {
             }
         }
         .padding(14)
-        .meshCard(borderColor: MeshTheme.dtnIndigo.opacity(0.35))
+        .meshCard(borderColor: MeshTheme.dtnIndigo.opacity(0.32))
     }
 
     private func dtnMetricPill(label: String, value: String) -> some View {
@@ -311,7 +325,7 @@ public struct DirectMessagesTab: View {
                 .font(.caption2.monospacedDigit().weight(.bold))
                 .foregroundStyle(MeshTheme.primaryText)
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 9)
         .padding(.vertical, 4)
         .background(MeshTheme.elevatedSurface, in: Capsule())
     }
@@ -348,14 +362,14 @@ private struct DirectPeerChatRoomView: View {
                             .padding(.top, 44)
                             .padding(.horizontal, 20)
                     } else {
-                        LazyVStack(spacing: 14) {
+                        LazyVStack(spacing: 16) {
                             ForEach(messages) { item in
                                 directBubbleRow(item)
                                     .id(item.id)
                             }
                         }
                         .padding(.horizontal, 16)
-                        .padding(.vertical, 14)
+                        .padding(.vertical, 16)
                     }
                 }
                 .scrollDismissesKeyboard(.interactively)
@@ -374,7 +388,7 @@ private struct DirectPeerChatRoomView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
-        .toolbarBackground(MeshTheme.cardSurface, for: .navigationBar)
+        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         #endif
         .toolbar {
@@ -393,7 +407,7 @@ private struct DirectPeerChatRoomView: View {
                     .frame(minWidth: MeshTheme.minTapDimension, minHeight: MeshTheme.minTapDimension)
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.applePressable)
                 .accessibilityLabel("Đối chiếu vân tay khóa mã hóa đầu cuối")
             }
         }
@@ -426,20 +440,20 @@ private struct DirectPeerChatRoomView: View {
                 .foregroundStyle(MeshTheme.secondaryText)
             }
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(MeshTheme.cardSurface.opacity(0.85))
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(MeshTheme.hairlineBorder)
-                .frame(height: 1)
+                .frame(height: 0.8)
         }
     }
 
     private var emptyRoomState: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 12) {
             Image(systemName: "lock.shield.fill")
-                .font(.title2.weight(.semibold))
+                .font(.system(size: 32, weight: .semibold))
                 .foregroundStyle(MeshTheme.p2pGreen)
 
             Text("Phòng trò chuyện mã hóa đầu-cuối")
@@ -451,13 +465,13 @@ private struct DirectPeerChatRoomView: View {
                 .foregroundStyle(MeshTheme.secondaryText)
                 .multilineTextAlignment(.center)
         }
-        .padding(20)
+        .padding(24)
         .frame(maxWidth: .infinity)
         .meshCard()
     }
 
     private func directBubbleRow(_ item: ChatThreadItem) -> some View {
-        VStack(alignment: item.isOutgoing ? .trailing : .leading, spacing: 6) {
+        VStack(alignment: item.isOutgoing ? .trailing : .leading, spacing: 5) {
             HStack(spacing: 5) {
                 if item.isEncrypted {
                     Image(systemName: "lock.fill")
@@ -468,33 +482,35 @@ private struct DirectPeerChatRoomView: View {
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(MeshTheme.secondaryText)
             }
+            .padding(.horizontal, 4)
 
             VStack(alignment: .leading, spacing: 8) {
                 Text(item.text)
                     .font(.body)
-                    .foregroundStyle(MeshTheme.primaryText)
+                    .foregroundStyle(item.isOutgoing ? Color.white : MeshTheme.primaryText)
                     .fixedSize(horizontal: false, vertical: true)
 
                 if let coord = item.coordinate {
                     GeoLocationLinkChip(
                         coordinate: coord,
                         label: item.senderName,
-                        tint: MeshTheme.p2pGreen
+                        tint: item.isOutgoing ? Color.white : MeshTheme.p2pGreen
                     )
                 }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .background(
-                item.isOutgoing ? MeshTheme.p2pGreen.opacity(0.18) : MeshTheme.cardSurface,
-                in: RoundedRectangle(cornerRadius: MeshTheme.cardCornerRadius, style: .continuous)
+                item.isOutgoing
+                    ? AnyShapeStyle(MeshTheme.p2pGreen)
+                    : AnyShapeStyle(MeshTheme.cardSurface),
+                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
             )
             .overlay {
-                RoundedRectangle(cornerRadius: MeshTheme.cardCornerRadius, style: .continuous)
-                    .strokeBorder(
-                        item.isOutgoing ? MeshTheme.p2pGreen.opacity(0.38) : MeshTheme.hairlineBorder,
-                        lineWidth: 1
-                    )
+                if !item.isOutgoing {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(MeshTheme.hairlineBorder, lineWidth: 0.8)
+                }
             }
             .frame(maxWidth: 320, alignment: item.isOutgoing ? .trailing : .leading)
 
@@ -504,6 +520,7 @@ private struct DirectPeerChatRoomView: View {
                 deliveryState: item.isOutgoing ? item.deliveryState : nil,
                 rttMs: item.rttMs
             )
+            .padding(.horizontal, 4)
         }
         .frame(maxWidth: .infinity, alignment: item.isOutgoing ? .trailing : .leading)
     }
@@ -518,7 +535,7 @@ private struct DirectPeerChatRoomView: View {
                         .font(.caption2.weight(.medium))
                 }
                 .foregroundStyle(MeshTheme.p2pGreen)
-                .padding(.horizontal, 4)
+                .padding(.horizontal, 6)
             }
 
             HStack(alignment: .bottom, spacing: 8) {
@@ -538,11 +555,11 @@ private struct DirectPeerChatRoomView: View {
                         .overlay {
                             Circle().strokeBorder(
                                 includeGPS ? MeshTheme.p2pGreen.opacity(0.45) : MeshTheme.hairlineBorder,
-                                lineWidth: 1
+                                lineWidth: 0.8
                             )
                         }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.applePressable)
                 .sensoryFeedback(.selection, trigger: includeGPS)
                 .accessibilityLabel(includeGPS ? "Đã bật đính kèm vị trí GPS" : "Đính kèm vị trí GPS")
 
@@ -553,33 +570,37 @@ private struct DirectPeerChatRoomView: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .frame(minHeight: MeshTheme.minTapDimension)
-                    .background(MeshTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .background(MeshTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                     .overlay {
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .strokeBorder(MeshTheme.hairlineBorder, lineWidth: 1)
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .strokeBorder(MeshTheme.hairlineBorder, lineWidth: 0.8)
                     }
 
                 Button {
                     submitDirectMessage()
                 } label: {
-                    Image(systemName: "paperplane.fill")
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(canSend ? MeshTheme.background : MeshTheme.secondaryText)
-                        .frame(width: MeshTheme.minTapDimension, height: MeshTheme.minTapDimension)
+                    Image(systemName: "arrow.up")
+                        .font(.body.weight(.bold))
+                        .foregroundStyle(canSend ? Color.white : MeshTheme.secondaryText)
+                        .frame(width: 36, height: 36)
                         .background(canSend ? MeshTheme.p2pGreen : MeshTheme.elevatedSurface, in: Circle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.applePressable)
                 .disabled(!canSend)
+                .padding(.bottom, 4)
                 .accessibilityLabel("Gửi tin nhắn mã hóa")
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(MeshTheme.cardSurface)
+        .padding(.vertical, 8)
+        .background {
+            MeshTheme.background.opacity(0.85)
+                .background(.ultraThinMaterial)
+        }
         .overlay(alignment: .top) {
             Rectangle()
                 .fill(MeshTheme.hairlineBorder)
-                .frame(height: 1)
+                .frame(height: 0.8)
         }
     }
 
@@ -658,6 +679,7 @@ private struct KeyFingerprintVerificationSheet: View {
                     Button("Đóng") {
                         dismiss()
                     }
+                    .font(.body.weight(.semibold))
                     .frame(minWidth: MeshTheme.minTapDimension, minHeight: MeshTheme.minTapDimension)
                 }
             }
@@ -680,7 +702,7 @@ private struct KeyFingerprintVerificationSheet: View {
                     .font(.headline)
                     .foregroundStyle(MeshTheme.primaryText)
                 Spacer()
-                Text(identity.nodeID)
+                Text(identity.nodeID.prefix(12) + "…")
                     .font(.caption.monospaced())
                     .foregroundStyle(MeshTheme.secondaryText)
             }
@@ -692,7 +714,7 @@ private struct KeyFingerprintVerificationSheet: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(MeshTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .background(MeshTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .padding(14)
         .meshCard()

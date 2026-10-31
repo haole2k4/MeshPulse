@@ -2,8 +2,10 @@
 import MeshCore
 import SwiftUI
 
-/// Persistent tactical top status bar with 1-tap Radio toggle, editable Display Name,
-/// and 1.5-second continuous hold-to-trigger SOS Signal button.
+/// Dynamic Island Status Bar for MeshPulse.
+/// Embraces the iPhone Dynamic Island hardware geometry with a glanceable compact pill
+/// and an interactive expanded card for real-time mesh radio links, DTN outbox transfers,
+/// station identity, and emergency SOS broadcast.
 public struct TopStatusHeader: View {
     private static let sosHoldDuration: TimeInterval = 1.5
 
@@ -11,6 +13,7 @@ public struct TopStatusHeader: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    @State private var isIslandExpanded = false
     @State private var isShowingRenameAlert = false
     @State private var draftDisplayName = ""
 
@@ -26,37 +29,27 @@ public struct TopStatusHeader: View {
 
     public var body: some View {
         VStack(spacing: 8) {
-            HStack(spacing: 10) {
-                radioStatusButton
-                Spacer(minLength: 4)
-                deviceIdentityButton
-                Spacer(minLength: 4)
-                sosHoldButton
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background {
-                MeshTheme.background.opacity(0.92)
-                    .background(.ultraThinMaterial)
-            }
-            .overlay(alignment: .bottom) {
-                Rectangle()
-                    .fill(MeshTheme.hairlineBorder)
-                    .frame(height: 1)
-            }
+            dynamicIslandCapsule
+                .padding(.horizontal, 14)
+                .padding(.top, 4)
+                .padding(.bottom, 6)
 
             if isPressingSOS {
                 sosHoldHintPill
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, 14)
                     .transition(.opacity)
             }
-
-            if let sosBanner = coordinator.activeSOSBanner {
-                emergencySOSBanner(sosBanner)
-                    .padding(.horizontal, 12)
-                    .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
-            }
         }
+        .background {
+            MeshTheme.background.opacity(0.85)
+                .background(.ultraThinMaterial)
+        }
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(MeshTheme.hairlineBorder)
+                .frame(height: 0.8)
+        }
+        .animation(.spring(response: 0.36, dampingFraction: 0.78), value: isIslandExpanded)
         .animation(MeshTheme.animation(reduceMotion: reduceMotion), value: isPressingSOS)
         .animation(MeshTheme.animation(reduceMotion: reduceMotion), value: coordinator.activeSOSBanner?.id)
         .alert("Đổi tên hiển thị", isPresented: $isShowingRenameAlert) {
@@ -72,113 +65,370 @@ public struct TopStatusHeader: View {
         }
     }
 
-    // MARK: - Left: Radio & Link Counts Pill
+    // MARK: - Dynamic Island Pill & Expanded Card
 
-    private var radioStatusButton: some View {
-        Button {
-            withAnimation(MeshTheme.animation(reduceMotion: reduceMotion)) {
-                coordinator.toggleRadio()
+    private var dynamicIslandCapsule: some View {
+        VStack(spacing: 0) {
+            if isIslandExpanded {
+                expandedIslandView
+            } else {
+                compactIslandView
             }
+        }
+        .background(Color.black, in: RoundedRectangle(cornerRadius: isIslandExpanded ? 24 : 22, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: isIslandExpanded ? 24 : 22, style: .continuous)
+                .strokeBorder(
+                    coordinator.activeSOSBanner != nil
+                        ? MeshTheme.sosCrimson.opacity(0.65)
+                        : Color.white.opacity(0.14),
+                    lineWidth: coordinator.activeSOSBanner != nil ? 1.5 : 0.8
+                )
+        }
+        .shadow(color: Color.black.opacity(0.4), radius: 8, x: 0, y: 4)
+    }
+
+    // MARK: - 1. Compact Island State (Hardware Pill)
+
+    private var compactIslandView: some View {
+        Button {
+            isIslandExpanded = true
         } label: {
-            HStack(spacing: 7) {
-                if coordinator.isRadioEnabled {
-                    HStack(spacing: 4) {
+            HStack(spacing: 8) {
+                // Leading: Radio Wave / Peer Pulse Indicator
+                HStack(spacing: 5) {
+                    if coordinator.isRadioEnabled {
                         Circle()
                             .fill(MeshTheme.p2pGreen)
-                            .frame(width: 7, height: 7)
+                            .frame(width: 8, height: 8)
+                            .shadow(color: MeshTheme.p2pGreen.opacity(0.6), radius: 4)
                         Text("\(coordinator.directP2PCount)")
-                            .font(.caption.monospacedDigit().weight(.bold))
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .monospacedDigit()
                             .foregroundStyle(MeshTheme.primaryText)
-                        Text("P2P")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(MeshTheme.secondaryText)
+                    } else {
+                        Image(systemName: "antenna.radiowaves.left.and.right.slash")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(MeshTheme.sosCrimson)
                     }
+                }
+                .padding(.leading, 6)
 
-                    Rectangle()
-                        .fill(MeshTheme.hairlineBorder)
-                        .frame(width: 1, height: 12)
+                Spacer(minLength: 4)
 
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(MeshTheme.meshAmber)
-                            .frame(width: 7, height: 7)
-                        Text("\(coordinator.meshRelayedCount)")
-                            .font(.caption.monospacedDigit().weight(.bold))
-                            .foregroundStyle(MeshTheme.primaryText)
-                        Text("Mesh")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(MeshTheme.secondaryText)
+                // Center: Dynamic status or Station name
+                if let sos = coordinator.activeSOSBanner {
+                    HStack(spacing: 5) {
+                        Image(systemName: "light.beacon.max.fill")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(MeshTheme.sosCrimson)
+                        Text("SOS: \(sos.senderName)")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(MeshTheme.sosCrimson)
+                            .lineLimit(1)
                     }
                 } else {
-                    Image(systemName: "antenna.radiowaves.left.and.right.slash")
-                        .imageScale(.small)
-                        .foregroundStyle(MeshTheme.sosCrimson)
-                    Text("Tắt sóng")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(MeshTheme.sosCrimson)
+                    HStack(spacing: 4) {
+                        Text(coordinator.localDisplayName)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(MeshTheme.primaryText)
+                            .lineLimit(1)
+
+                        if coordinator.isMockMode {
+                            Text("MOCK")
+                                .font(.system(size: 8, weight: .heavy, design: .monospaced))
+                                .foregroundStyle(MeshTheme.dtnIndigo)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1.5)
+                                .background(MeshTheme.dtnIndigo.opacity(0.2), in: Capsule())
+                        }
+                    }
                 }
 
-                if coordinator.isMockMode {
-                    Text("SIM")
-                        .font(.caption2.monospaced().weight(.bold))
+                Spacer(minLength: 4)
+
+                // Trailing: SOS / DTN / Relay status
+                HStack(spacing: 6) {
+                    if coordinator.activeSOSBanner != nil {
+                        Text("KHẨN")
+                            .font(.system(size: 10, weight: .heavy))
+                            .foregroundStyle(Color.white)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2.5)
+                            .background(MeshTheme.sosCrimson, in: Capsule())
+                    } else if !coordinator.dtnRecords.isEmpty {
+                        HStack(spacing: 3) {
+                            Image(systemName: "tray.fill")
+                                .font(.system(size: 9, weight: .bold))
+                            Text("\(coordinator.dtnRecords.count)")
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                .monospacedDigit()
+                        }
                         .foregroundStyle(MeshTheme.dtnIndigo)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(MeshTheme.dtnIndigo.opacity(0.16), in: Capsule())
-                }
-            }
-            .padding(.horizontal, 10)
-            .frame(minWidth: MeshTheme.minTapDimension, minHeight: MeshTheme.minTapDimension)
-            .background(MeshTheme.cardSurface, in: Capsule())
-            .overlay {
-                Capsule().strokeBorder(
-                    coordinator.isRadioEnabled ? MeshTheme.hairlineBorder : MeshTheme.sosCrimson.opacity(0.45),
-                    lineWidth: 1
-                )
-            }
-        }
-        .buttonStyle(.plain)
-        .sensoryFeedback(.selection, trigger: coordinator.isRadioEnabled)
-        .accessibilityLabel(
-            coordinator.isRadioEnabled
-                ? "Sóng đang bật: \(coordinator.directP2PCount) kết nối trực tiếp, \(coordinator.meshRelayedCount) kết nối bắc cầu"
-                : "Sóng ngoại tuyến đang tắt"
-        )
-        .accessibilityHint("Chạm để bật hoặc tắt nhanh sóng mạng lưới")
-    }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2.5)
+                        .background(MeshTheme.dtnIndigo.opacity(0.18), in: Capsule())
+                    } else if coordinator.isRadioEnabled {
+                        HStack(spacing: 3) {
+                            Circle()
+                                .fill(MeshTheme.meshAmber)
+                                .frame(width: 6, height: 6)
+                            Text("\(coordinator.meshRelayedCount)")
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                .monospacedDigit()
+                                .foregroundStyle(MeshTheme.secondaryText)
+                        }
+                    } else {
+                        Text("OFF")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(MeshTheme.sosCrimson)
+                    }
 
-    // MARK: - Center: Editable Local Node Identity
-
-    private var deviceIdentityButton: some View {
-        Button {
-            draftDisplayName = coordinator.localDisplayName
-            isShowingRenameAlert = true
-        } label: {
-            VStack(spacing: 1) {
-                HStack(spacing: 4) {
-                    Text(coordinator.localDisplayName)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(MeshTheme.primaryText)
-                        .lineLimit(1)
-                    Image(systemName: "pencil")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(MeshTheme.secondaryText)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(MeshTheme.secondaryText.opacity(0.7))
                 }
-                Text(coordinator.localNodeID)
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(MeshTheme.secondaryText)
-                    .lineLimit(1)
+                .padding(.trailing, 6)
             }
+            .frame(height: 40)
             .padding(.horizontal, 8)
-            .frame(minHeight: MeshTheme.minTapDimension)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Thiết bị hiện tại: \(coordinator.localDisplayName), mã nút \(coordinator.localNodeID)")
-        .accessibilityHint("Chạm để đổi tên hiển thị")
+        .buttonStyle(.applePressable(scaleDown: 0.98, pressedOpacity: 0.9))
+        .sensoryFeedback(.impact(weight: .light), trigger: isIslandExpanded)
     }
 
-    // MARK: - Right: 1.5s Hold-to-Trigger SOS Control
+    // MARK: - 2. Expanded Island State (Full Card)
+
+    private var expandedIslandView: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            // Header Bar inside Expanded Island
+            HStack(alignment: .center) {
+                HStack(spacing: 6) {
+                    Image(systemName: "dot.radiowaves.left.and.right")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(coordinator.isRadioEnabled ? MeshTheme.p2pGreen : MeshTheme.sosCrimson)
+
+                    Text("MeshPulse · Dynamic Island")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(MeshTheme.secondaryText)
+                }
+
+                Spacer()
+
+                Button {
+                    isIslandExpanded = false
+                } label: {
+                    Image(systemName: "chevron.up.circle.fill")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(MeshTheme.secondaryText)
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.applePressable)
+                .sensoryFeedback(.impact(weight: .light), trigger: isIslandExpanded)
+            }
+
+            // Real-Time Link Matrix (3 Glancable Badges)
+            HStack(spacing: 8) {
+                islandMetricPill(
+                    title: "1-Hop P2P",
+                    count: "\(coordinator.directP2PCount)",
+                    color: MeshTheme.p2pGreen,
+                    icon: "antenna.radiowaves.left.and.right"
+                )
+
+                islandMetricPill(
+                    title: "Bắc cầu Mesh",
+                    count: "\(coordinator.meshRelayedCount)",
+                    color: MeshTheme.meshAmber,
+                    icon: "point.3.connected.trianglepath.dotted"
+                )
+
+                islandMetricPill(
+                    title: "Chờ DTN",
+                    count: "\(coordinator.dtnRecords.count)",
+                    color: MeshTheme.dtnIndigo,
+                    icon: "tray.fill"
+                )
+            }
+
+            // Quick Station Identity & Fast Radio Switch Row
+            HStack(spacing: 10) {
+                Button {
+                    draftDisplayName = coordinator.localDisplayName
+                    isShowingRenameAlert = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "person.crop.circle.fill")
+                            .font(.body)
+                            .foregroundStyle(MeshTheme.p2pGreen)
+
+                        VStack(alignment: .leading, spacing: 1) {
+                            HStack(spacing: 4) {
+                                Text(coordinator.localDisplayName)
+                                    .font(.subheadline.weight(.bold))
+                                    .foregroundStyle(MeshTheme.primaryText)
+                                    .lineLimit(1)
+                                Image(systemName: "pencil")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundStyle(MeshTheme.secondaryText)
+                            }
+                            Text(coordinator.localNodeID.prefix(14) + "…")
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(MeshTheme.secondaryText)
+                        }
+                        Spacer()
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(MeshTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.applePressable)
+
+                Button {
+                    withAnimation(MeshTheme.animation(reduceMotion: reduceMotion)) {
+                        coordinator.toggleRadio()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: coordinator.isRadioEnabled ? "power" : "power.circle.fill")
+                            .font(.caption.weight(.bold))
+                        Text(coordinator.isRadioEnabled ? "Tắt sóng" : "Bật sóng")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundStyle(coordinator.isRadioEnabled ? MeshTheme.primaryText : MeshTheme.p2pGreen)
+                    .padding(.horizontal, 12)
+                    .frame(height: 44)
+                    .background(
+                        coordinator.isRadioEnabled ? MeshTheme.elevatedSurface : MeshTheme.p2pGreen.opacity(0.18),
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(
+                                coordinator.isRadioEnabled ? MeshTheme.hairlineBorder : MeshTheme.p2pGreen.opacity(0.4),
+                                lineWidth: 0.8
+                            )
+                    }
+                }
+                .buttonStyle(.applePressable)
+                .sensoryFeedback(.selection, trigger: coordinator.isRadioEnabled)
+            }
+
+            // Emergency SOS Alert or SOS Hold Trigger Section
+            if let sos = coordinator.activeSOSBanner {
+                emergencySOSIslandCard(sos)
+            } else {
+                HStack(spacing: 12) {
+                    sosHoldButton
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Phát tín hiệu cứu nạn SOS")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(MeshTheme.primaryText)
+                        Text("Nhấn giữ vòng tròn 1.5 giây để phát tọa độ GPS khẩn cấp tới mọi máy trong bán kính bước nhảy.")
+                            .font(.caption2)
+                            .foregroundStyle(MeshTheme.secondaryText)
+                    }
+                }
+                .padding(10)
+                .background(MeshTheme.elevatedSurface.opacity(0.5), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+        }
+        .padding(14)
+    }
+
+    private func islandMetricPill(title: String, count: String, color: Color, icon: String) -> some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 10, weight: .bold))
+                Text(count)
+                    .font(.system(size: 15, weight: .heavy, design: .rounded))
+                    .monospacedDigit()
+            }
+            .foregroundStyle(color)
+
+            Text(title)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(MeshTheme.secondaryText)
+                .lineLimit(1)
+        }
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
+        .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(color.opacity(0.28), lineWidth: 0.8)
+        }
+    }
+
+    private func emergencySOSIslandCard(_ item: ChatThreadItem) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "light.beacon.max.fill")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(MeshTheme.sosCrimson)
+
+                Text(item.isOutgoing ? "BẠN ĐANG PHÁT SOS" : "SOS TỪ \(item.senderName)")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(MeshTheme.sosCrimson)
+
+                Spacer()
+
+                Text("\(item.hopCount)H")
+                    .font(.caption2.monospaced().weight(.bold))
+                    .foregroundStyle(MeshTheme.sosCrimson)
+            }
+
+            Text(item.text)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(MeshTheme.primaryText)
+                .lineLimit(2)
+
+            HStack(spacing: 8) {
+                Button {
+                    withAnimation(MeshTheme.animation(reduceMotion: reduceMotion)) {
+                        coordinator.selectedTab = .broadcast
+                        coordinator.dismissSOSBanner()
+                        isIslandExpanded = false
+                    }
+                } label: {
+                    Text("Xem trên Kênh Chung")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Color.white)
+                        .padding(.horizontal, 12)
+                        .frame(height: 32)
+                        .background(MeshTheme.sosCrimson, in: Capsule())
+                }
+                .buttonStyle(.applePressable)
+
+                Spacer()
+
+                Button {
+                    withAnimation(MeshTheme.animation(reduceMotion: reduceMotion)) {
+                        coordinator.dismissSOSBanner()
+                    }
+                } label: {
+                    Text("Bỏ qua")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(MeshTheme.secondaryText)
+                        .padding(.horizontal, 10)
+                        .frame(height: 32)
+                }
+                .buttonStyle(.applePressable)
+            }
+        }
+        .padding(12)
+        .background(MeshTheme.sosCrimson.opacity(0.18), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(MeshTheme.sosCrimson.opacity(0.55), lineWidth: 1)
+        }
+    }
+
+    // MARK: - SOS Hold Control & Progress
 
     private var sosHoldButton: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: !isPressingSOS)) { context in
@@ -188,18 +438,18 @@ public struct TopStatusHeader: View {
                 Circle()
                     .fill(
                         isPressingSOS
-                            ? MeshTheme.sosCrimson.opacity(0.28)
-                            : MeshTheme.sosCrimson.opacity(0.15)
+                            ? MeshTheme.sosCrimson.opacity(0.32)
+                            : MeshTheme.sosCrimson.opacity(0.16)
                     )
 
                 Circle()
-                    .strokeBorder(MeshTheme.sosCrimson.opacity(0.38), lineWidth: 1.5)
+                    .strokeBorder(MeshTheme.sosCrimson.opacity(0.36), lineWidth: 1.5)
 
                 Circle()
                     .trim(from: 0, to: progress)
                     .stroke(
                         MeshTheme.sosCrimson,
-                        style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                        style: StrokeStyle(lineWidth: 3.5, lineCap: .round)
                     )
                     .rotationEffect(.degrees(-90))
                     .padding(1.5)
@@ -208,19 +458,19 @@ public struct TopStatusHeader: View {
                     Image(systemName: "light.beacon.max.fill")
                         .font(.caption.weight(.bold))
                     Text("SOS")
-                        .font(.caption2.monospaced().weight(.bold))
+                        .font(.system(size: 9, weight: .heavy, design: .monospaced))
                 }
                 .foregroundStyle(MeshTheme.sosCrimson)
             }
-            .frame(width: 46, height: 46)
+            .frame(width: 44, height: 44)
             .scaleEffect(isPressingSOS && !reduceMotion ? 0.94 : 1.0)
             .contentShape(Circle())
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
-                        let dx = value.location.x - 23
-                        let dy = value.location.y - 23
-                        if hypot(dx, dy) > 56 {
+                        let dx = value.location.x - 22
+                        let dy = value.location.y - 22
+                        if hypot(dx, dy) > 54 {
                             cancelSOSHold()
                             return
                         }
@@ -257,94 +507,14 @@ public struct TopStatusHeader: View {
             }
             .font(.caption.weight(.medium))
             .foregroundStyle(MeshTheme.primaryText)
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 14)
             .padding(.vertical, 6)
-            .background(MeshTheme.sosCrimson.opacity(0.22), in: Capsule())
+            .background(MeshTheme.sosCrimson.opacity(0.24), in: Capsule())
             .overlay {
-                Capsule().strokeBorder(MeshTheme.sosCrimson.opacity(0.5), lineWidth: 1)
+                Capsule().strokeBorder(MeshTheme.sosCrimson.opacity(0.55), lineWidth: 0.8)
             }
         }
     }
-
-    // MARK: - Active SOS Signal Alert Banner
-
-    private func emergencySOSBanner(_ item: ChatThreadItem) -> some View {
-        HStack(alignment: .center, spacing: 10) {
-            Image(systemName: "light.beacon.max.fill")
-                .font(.headline)
-                .foregroundStyle(MeshTheme.sosCrimson)
-
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text(item.isOutgoing ? "Đã phát tín hiệu SOS" : "SOS từ \(item.senderName)")
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(MeshTheme.primaryText)
-                    Text("\(item.hopCount)H")
-                        .font(.caption2.monospaced().weight(.semibold))
-                        .foregroundStyle(MeshTheme.sosCrimson)
-                }
-
-                Text(item.text)
-                    .font(.caption)
-                    .foregroundStyle(MeshTheme.primaryText.opacity(0.9))
-                    .lineLimit(2)
-
-                if let coord = item.coordinate {
-                    HStack(spacing: 4) {
-                        Image(systemName: "location.fill")
-                            .imageScale(.small)
-                        Text(formatCoordinate(coord))
-                            .font(.caption2.monospaced())
-                    }
-                    .foregroundStyle(MeshTheme.badgeText)
-                }
-            }
-
-            Spacer(minLength: 4)
-
-            Button {
-                withAnimation(MeshTheme.animation(reduceMotion: reduceMotion)) {
-                    coordinator.selectedTab = .broadcast
-                    coordinator.dismissSOSBanner()
-                }
-            } label: {
-                Text("Mở")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(MeshTheme.primaryText)
-                    .padding(.horizontal, 10)
-                    .frame(minHeight: MeshTheme.minTapDimension)
-                    .background(MeshTheme.sosCrimson.opacity(0.32), in: Capsule())
-            }
-            .buttonStyle(.plain)
-
-            Button {
-                withAnimation(MeshTheme.animation(reduceMotion: reduceMotion)) {
-                    coordinator.dismissSOSBanner()
-                }
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(MeshTheme.secondaryText)
-                    .frame(width: MeshTheme.minTapDimension, height: MeshTheme.minTapDimension)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Đóng cảnh báo SOS")
-        }
-        .padding(.leading, 12)
-        .padding(.trailing, 4)
-        .padding(.vertical, 6)
-        .background(
-            MeshTheme.sosCrimson.opacity(0.14),
-            in: RoundedRectangle(cornerRadius: MeshTheme.cardCornerRadius, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: MeshTheme.cardCornerRadius, style: .continuous)
-                .strokeBorder(MeshTheme.sosCrimson.opacity(0.55), lineWidth: 1)
-        }
-    }
-
-    // MARK: - SOS Hold Helpers
 
     private func holdProgress(at date: Date) -> Double {
         guard isPressingSOS, let start = sosPressStartDate else {
@@ -382,13 +552,6 @@ public struct TopStatusHeader: View {
         }
         sosPressStartDate = nil
         didFireCurrentSOSHold = false
-    }
-
-    private func formatCoordinate(_ coord: GeoCoordinate) -> String {
-        let lat = coord.latitude.formatted(.number.precision(.fractionLength(5)))
-        let lon = coord.longitude.formatted(.number.precision(.fractionLength(5)))
-        let acc = Int(coord.accuracyMeters.rounded())
-        return "\(lat), \(lon) (±\(acc)m)"
     }
 }
 #endif

@@ -38,7 +38,7 @@ public struct ContentView: View {
                     .tag(AppTab.lab)
             }
             #if os(iOS)
-            .toolbarBackground(MeshTheme.cardSurface, for: .tabBar)
+            .toolbarBackground(.ultraThinMaterial, for: .tabBar)
             .toolbarBackground(.visible, for: .tabBar)
             #endif
         }

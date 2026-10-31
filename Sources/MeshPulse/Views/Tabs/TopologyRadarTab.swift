@@ -22,7 +22,7 @@ public struct TopologyRadarTab: View {
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
-            .padding(.bottom, 28)
+            .padding(.bottom, 32)
         }
         .background(MeshTheme.background)
         .sensoryFeedback(.impact(weight: .light), trigger: pingFeedbackCount)
@@ -31,7 +31,7 @@ public struct TopologyRadarTab: View {
     // MARK: - Real-Time Canvas Topology Card
 
     private var radarCanvasCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: 8) {
                 Label("Đồ thị Định tuyến Thời gian thực", systemImage: "point.3.connected.trianglepath.dotted")
                     .font(.subheadline.weight(.semibold))
@@ -40,10 +40,10 @@ public struct TopologyRadarTab: View {
                 Spacer(minLength: 4)
 
                 Text(coordinator.routingStrategy.title)
-                    .font(.caption2.monospaced().weight(.semibold))
+                    .font(.caption2.weight(.semibold))
                     .foregroundStyle(MeshTheme.badgeText)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
                     .background(MeshTheme.elevatedSurface, in: Capsule())
             }
 
@@ -67,7 +67,7 @@ public struct TopologyRadarTab: View {
 
                     drawLocalCenterNode(in: &context, at: positions[coordinator.localIdentity.nodeID] ?? CGPoint(x: size.width / 2, y: size.height / 2))
                 }
-                .frame(maxWidth: .infinity, minHeight: 236)
+                .frame(maxWidth: .infinity, minHeight: 240)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(radarAccessibilitySummary)
             }
@@ -75,7 +75,6 @@ public struct TopologyRadarTab: View {
             legendBar
         }
         .padding(14)
-        .frame(minHeight: 294)
         .meshCard()
     }
 
@@ -84,7 +83,7 @@ public struct TopologyRadarTab: View {
             HStack(spacing: 6) {
                 Capsule()
                     .fill(MeshTheme.p2pGreen)
-                    .frame(width: 16, height: 3)
+                    .frame(width: 14, height: 3.5)
                 Text("1-Hop P2P")
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(MeshTheme.secondaryText)
@@ -92,10 +91,10 @@ public struct TopologyRadarTab: View {
 
             HStack(spacing: 6) {
                 HStack(spacing: 2) {
-                    Capsule().fill(MeshTheme.meshAmber).frame(width: 6, height: 3)
-                    Capsule().fill(MeshTheme.meshAmber).frame(width: 6, height: 3)
+                    Capsule().fill(MeshTheme.meshAmber).frame(width: 5, height: 3.5)
+                    Capsule().fill(MeshTheme.meshAmber).frame(width: 5, height: 3.5)
                 }
-                Text("Multi-Hop Bắc cầu")
+                Text("Bắc cầu Multi-Hop")
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(MeshTheme.secondaryText)
             }
@@ -111,6 +110,7 @@ public struct TopologyRadarTab: View {
                     .foregroundStyle(MeshTheme.secondaryText)
             }
         }
+        .padding(.top, 2)
     }
 
     // MARK: - Canvas Drawing Primitives
@@ -119,14 +119,14 @@ public struct TopologyRadarTab: View {
         let center = CGPoint(x: size.width / 2, y: size.height / 2)
         let maxR = min(size.width, size.height) * 0.44
 
-        for fraction in [0.48, 0.88] {
+        for fraction in [0.46, 0.86] {
             let r = maxR * fraction
             let rect = CGRect(x: center.x - r, y: center.y - r, width: r * 2, height: r * 2)
             let ring = Path(ellipseIn: rect)
             context.stroke(
                 ring,
-                with: .color(Color.white.opacity(0.05)),
-                style: StrokeStyle(lineWidth: 1, dash: [3, 5])
+                with: .color(Color.white.opacity(0.06)),
+                style: StrokeStyle(lineWidth: 1, dash: [4, 6])
             )
         }
     }
@@ -243,7 +243,7 @@ public struct TopologyRadarTab: View {
             if edge.isDirectP2P {
                 context.stroke(
                     path,
-                    with: .color(MeshTheme.p2pGreen.opacity(0.82)),
+                    with: .color(MeshTheme.p2pGreen.opacity(0.85)),
                     style: StrokeStyle(lineWidth: 2.2, lineCap: .round)
                 )
             } else {
@@ -279,7 +279,7 @@ public struct TopologyRadarTab: View {
                 ? MeshTheme.sosCrimson
                 : (pulse.isDirectP2P ? MeshTheme.p2pGreen : MeshTheme.meshAmber)
 
-            let haloRect = CGRect(x: current.x - 8, y: current.y - 8, width: 16, height: 16)
+            let haloRect = CGRect(x: current.x - 9, y: current.y - 9, width: 18, height: 18)
             context.fill(Path(ellipseIn: haloRect), with: .color(color.opacity(0.28)))
 
             let coreRect = CGRect(x: current.x - 4, y: current.y - 4, width: 8, height: 8)
@@ -321,12 +321,12 @@ public struct TopologyRadarTab: View {
 
     private func drawLocalCenterNode(in context: inout GraphicsContext, at pt: CGPoint) {
         let accent = coordinator.isRadioEnabled ? MeshTheme.p2pGreen : MeshTheme.sosCrimson
-        let haloRect = CGRect(x: pt.x - 21, y: pt.y - 21, width: 42, height: 42)
+        let haloRect = CGRect(x: pt.x - 22, y: pt.y - 22, width: 44, height: 44)
         context.fill(Path(ellipseIn: haloRect), with: .color(accent.opacity(0.14)))
 
         let nodeRect = CGRect(x: pt.x - 15, y: pt.y - 15, width: 30, height: 30)
         context.fill(Path(ellipseIn: nodeRect), with: .color(MeshTheme.elevatedSurface))
-        context.stroke(Path(ellipseIn: nodeRect), with: .color(accent), lineWidth: 2.4)
+        context.stroke(Path(ellipseIn: nodeRect), with: .color(accent), lineWidth: 2.2)
 
         let centerDot = CGRect(x: pt.x - 5.5, y: pt.y - 5.5, width: 11, height: 11)
         context.fill(Path(ellipseIn: centerDot), with: .color(accent))
@@ -397,19 +397,19 @@ public struct TopologyRadarTab: View {
                 Label("Bật sóng mạng lưới", systemImage: "dot.radiowaves.left.and.right")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(MeshTheme.background)
-                    .padding(.horizontal, 18)
+                    .padding(.horizontal, 20)
                     .frame(minHeight: MeshTheme.minTapDimension)
                     .background(MeshTheme.p2pGreen, in: Capsule())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.applePressable)
         }
-        .padding(20)
+        .padding(22)
         .frame(maxWidth: .infinity)
         .meshCard()
     }
 
     private var scanningEmptyState: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 12) {
             Image(systemName: "dot.radiowaves.left.and.right")
                 .font(.title2.weight(.semibold))
                 .foregroundStyle(MeshTheme.p2pGreen)
@@ -423,7 +423,7 @@ public struct TopologyRadarTab: View {
                 .foregroundStyle(MeshTheme.secondaryText)
                 .multilineTextAlignment(.center)
         }
-        .padding(20)
+        .padding(22)
         .frame(maxWidth: .infinity)
         .meshCard()
     }
@@ -431,12 +431,29 @@ public struct TopologyRadarTab: View {
     private func peerStationCard(_ peer: PeerSummary) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 10) {
+                // Station Avatar
+                ZStack {
+                    Circle()
+                        .fill(MeshTheme.elevatedSurface)
+                        .frame(width: 40, height: 40)
+
+                    Image(systemName: "iphone.gen3")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(MeshTheme.color(for: peer.linkKind))
+
+                    Circle()
+                        .fill(MeshTheme.color(for: peer.linkKind))
+                        .frame(width: 9, height: 9)
+                        .overlay(Circle().stroke(MeshTheme.background, lineWidth: 1.5))
+                        .offset(x: 14, y: 14)
+                }
+
                 VStack(alignment: .leading, spacing: 3) {
                     Text(peer.identity.displayName)
                         .font(.headline)
                         .foregroundStyle(MeshTheme.primaryText)
 
-                    Text(peer.identity.nodeID)
+                    Text(peer.identity.nodeID.prefix(12) + "…")
                         .font(.caption.monospaced())
                         .foregroundStyle(MeshTheme.secondaryText)
                 }
@@ -481,14 +498,14 @@ public struct TopologyRadarTab: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(MeshTheme.primaryText)
                         .frame(maxWidth: .infinity, minHeight: MeshTheme.minTapDimension)
-                        .background(MeshTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .background(MeshTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                         .overlay {
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .strokeBorder(MeshTheme.hairlineBorder, lineWidth: 1)
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .strokeBorder(MeshTheme.hairlineBorder, lineWidth: 0.8)
                         }
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.applePressable)
                 .disabled(peer.linkKind == .offlineDTN)
                 .opacity(peer.linkKind == .offlineDTN ? 0.5 : 1.0)
                 .accessibilityLabel("Đo độ trễ Ping tới \(peer.identity.displayName)")
@@ -502,14 +519,14 @@ public struct TopologyRadarTab: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(MeshTheme.p2pGreen)
                         .frame(maxWidth: .infinity, minHeight: MeshTheme.minTapDimension)
-                        .background(MeshTheme.p2pGreen.opacity(0.14), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .background(MeshTheme.p2pGreen.opacity(0.14), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                         .overlay {
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .strokeBorder(MeshTheme.p2pGreen.opacity(0.35), lineWidth: 1)
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .strokeBorder(MeshTheme.p2pGreen.opacity(0.32), lineWidth: 0.8)
                         }
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.applePressable)
                 .accessibilityLabel("Nhắn tin mã hóa đầu cuối với \(peer.identity.displayName)")
             }
         }

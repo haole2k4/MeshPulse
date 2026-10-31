@@ -59,7 +59,7 @@ public enum AppTab: String, CaseIterable, Identifiable, Sendable {
         case .direct:
             "lock.shield.fill"
         case .lab:
-            "slider.horizontal.below.waveform"
+            "flask.fill"
         }
     }
 }

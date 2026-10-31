@@ -27,7 +27,7 @@ public struct MeshLabTab: View {
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
-            .padding(.bottom, 28)
+            .padding(.bottom, 32)
         }
         .background(MeshTheme.background)
         .sheet(isPresented: $isShowingPacketInspector) {
@@ -48,7 +48,7 @@ public struct MeshLabTab: View {
             }
         )
 
-        return VStack(alignment: .leading, spacing: 10) {
+        return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Label("Chế độ Vận hành", systemImage: "cpu.fill")
                     .font(.headline)
@@ -59,8 +59,8 @@ public struct MeshLabTab: View {
                 Text(coordinator.isMockMode ? "MOCK 3-NODE" : "LIVE RADIO")
                     .font(.caption2.monospaced().weight(.bold))
                     .foregroundStyle(coordinator.isMockMode ? MeshTheme.dtnIndigo : MeshTheme.p2pGreen)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
                     .background(
                         (coordinator.isMockMode ? MeshTheme.dtnIndigo : MeshTheme.p2pGreen).opacity(0.16),
                         in: Capsule()
@@ -68,7 +68,7 @@ public struct MeshLabTab: View {
             }
 
             Toggle(isOn: mockBinding) {
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text("Mạng Mô phỏng 3 Trạm (Mock Mode)")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(MeshTheme.primaryText)
@@ -87,7 +87,7 @@ public struct MeshLabTab: View {
             .sensoryFeedback(.selection, trigger: coordinator.isMockMode)
 
             if !coordinator.isMockMode, let statusNote = coordinator.radioStatusNote {
-                HStack(spacing: 6) {
+                HStack(spacing: 8) {
                     Image(systemName: "info.circle.fill")
                         .font(.caption)
                         .foregroundStyle(MeshTheme.meshAmber)
@@ -95,9 +95,9 @@ public struct MeshLabTab: View {
                         .font(.caption)
                         .foregroundStyle(MeshTheme.secondaryText)
                 }
-                .padding(10)
+                .padding(11)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(MeshTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .background(MeshTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
         .padding(14)
@@ -107,7 +107,7 @@ public struct MeshLabTab: View {
     // MARK: - 2. MANET / DTN Routing Strategy
 
     private var routingStrategySection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             Label("Chiến lược Định tuyến & DTN", systemImage: "arrow.triangle.branch")
                 .font(.headline)
                 .foregroundStyle(MeshTheme.primaryText)
@@ -119,16 +119,22 @@ public struct MeshLabTab: View {
                         coordinator.setRoutingStrategy(strategy)
                     }
                 } label: {
-                    HStack(alignment: .top, spacing: 10) {
+                    HStack(alignment: .top, spacing: 12) {
                         Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                             .font(.body.weight(.semibold))
                             .foregroundStyle(isSelected ? MeshTheme.p2pGreen : MeshTheme.secondaryText)
                             .padding(.top, 2)
 
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(strategy.title)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(MeshTheme.primaryText)
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 6) {
+                                Image(systemName: strategy.systemImage)
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(isSelected ? MeshTheme.p2pGreen : MeshTheme.secondaryText)
+
+                                Text(strategy.title)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(MeshTheme.primaryText)
+                            }
 
                             Text(strategy.subtitle)
                                 .font(.caption)
@@ -148,12 +154,12 @@ public struct MeshLabTab: View {
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .strokeBorder(
                                 isSelected ? MeshTheme.p2pGreen.opacity(0.45) : MeshTheme.hairlineBorder,
-                                lineWidth: 1
+                                lineWidth: 0.8
                             )
                     }
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.applePressable)
             }
         }
         .padding(14)
@@ -258,7 +264,7 @@ public struct MeshLabTab: View {
                     }
                 }
 
-                Text("\(peer.identity.nodeID) · \(linkSummaryText(peer.linkKind))")
+                Text("\(peer.identity.nodeID.prefix(12))… · \(linkSummaryText(peer.linkKind))")
                     .font(.caption2.monospaced())
                     .foregroundStyle(MeshTheme.secondaryText)
             }
@@ -267,7 +273,7 @@ public struct MeshLabTab: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .frame(minHeight: MeshTheme.minTapDimension)
-        .background(MeshTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(MeshTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .sensoryFeedback(.selection, trigger: isBlocked)
     }
 
@@ -283,10 +289,10 @@ public struct MeshLabTab: View {
         )
 
         return Toggle(isOn: binding) {
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 Circle()
                     .fill(isConnected ? MeshTheme.p2pGreen : MeshTheme.sosCrimson)
-                    .frame(width: 7, height: 7)
+                    .frame(width: 8, height: 8)
                 Text(title)
                     .font(.caption.monospaced().weight(.semibold))
                     .foregroundStyle(MeshTheme.primaryText)
@@ -294,9 +300,9 @@ public struct MeshLabTab: View {
         }
         .tint(MeshTheme.p2pGreen)
         .padding(.horizontal, 12)
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
         .frame(minHeight: MeshTheme.minTapDimension)
-        .background(MeshTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(MeshTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .sensoryFeedback(.selection, trigger: isConnected)
     }
 
@@ -336,14 +342,14 @@ public struct MeshLabTab: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(MeshTheme.secondaryText)
                         .padding(.horizontal, 12)
-                        .frame(minHeight: MeshTheme.minTapDimension)
+                        .frame(minHeight: 32)
                         .background(MeshTheme.elevatedSurface, in: Capsule())
                         .overlay {
-                            Capsule().strokeBorder(MeshTheme.hairlineBorder, lineWidth: 1)
+                            Capsule().strokeBorder(MeshTheme.hairlineBorder, lineWidth: 0.8)
                         }
                         .contentShape(Capsule())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.applePressable)
                 .accessibilityLabel("Đặt lại bộ đếm thống kê Telemetry")
             }
 
@@ -389,9 +395,15 @@ public struct MeshLabTab: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Image(systemName: symbol)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(accent)
+                ZStack {
+                    Circle()
+                        .fill(accent.opacity(0.16))
+                        .frame(width: 24, height: 24)
+                    Image(systemName: symbol)
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(accent)
+                }
+
                 Text(title)
                     .font(.caption)
                     .foregroundStyle(MeshTheme.secondaryText)
@@ -406,10 +418,10 @@ public struct MeshLabTab: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(MeshTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(MeshTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(MeshTheme.hairlineBorder, lineWidth: 1)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(MeshTheme.hairlineBorder, lineWidth: 0.8)
         }
     }
 
@@ -419,10 +431,15 @@ public struct MeshLabTab: View {
         Button {
             isShowingPacketInspector = true
         } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "doc.text.magnifyingglass")
-                    .font(.headline)
-                    .foregroundStyle(MeshTheme.p2pGreen)
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(MeshTheme.p2pGreen.opacity(0.16))
+                        .frame(width: 36, height: 36)
+                    Image(systemName: "doc.text.magnifyingglass")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(MeshTheme.p2pGreen)
+                }
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Nhật ký Gói tin (Packet Inspector)")
@@ -438,7 +455,7 @@ public struct MeshLabTab: View {
                 Text("\(coordinator.packetLogs.count)")
                     .font(.caption.monospacedDigit().weight(.bold))
                     .foregroundStyle(MeshTheme.primaryText)
-                    .padding(.horizontal, 8)
+                    .padding(.horizontal, 9)
                     .padding(.vertical, 4)
                     .background(MeshTheme.elevatedSurface, in: Capsule())
 
@@ -451,7 +468,7 @@ public struct MeshLabTab: View {
             .meshCard()
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.applePressable)
     }
 }
 
@@ -503,40 +520,43 @@ private struct PacketInspectorSheet: View {
                                 selectedFilter = filter
                             } label: {
                                 Text(filter.rawValue)
-                                    .font(.caption.monospaced().weight(.bold))
-                                    .foregroundStyle(active ? MeshTheme.background : MeshTheme.primaryText)
-                                    .padding(.horizontal, 12)
-                                    .frame(minHeight: MeshTheme.minTapDimension)
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(active ? Color.white : MeshTheme.primaryText)
+                                    .padding(.horizontal, 14)
+                                    .frame(minHeight: 34)
                                     .background(
                                         active ? MeshTheme.p2pGreen : MeshTheme.elevatedSurface,
                                         in: Capsule()
                                     )
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.applePressable)
                         }
                     }
                     .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
+                    .padding(.vertical, 10)
                 }
-                .background(MeshTheme.cardSurface)
+                .background {
+                    MeshTheme.cardSurface.opacity(0.9)
+                        .background(.ultraThinMaterial)
+                }
                 .overlay(alignment: .bottom) {
-                    Rectangle().fill(MeshTheme.hairlineBorder).frame(height: 1)
+                    Rectangle().fill(MeshTheme.hairlineBorder).frame(height: 0.8)
                 }
 
                 ScrollView {
                     if filteredLogs.isEmpty {
-                        VStack(spacing: 10) {
+                        VStack(spacing: 12) {
                             Image(systemName: "tray")
-                                .font(.title2)
+                                .font(.system(size: 32))
                                 .foregroundStyle(MeshTheme.secondaryText)
                             Text("Không có bản ghi gói tin phù hợp")
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(MeshTheme.primaryText)
                         }
-                        .padding(32)
+                        .padding(36)
                         .frame(maxWidth: .infinity)
                     } else {
-                        LazyVStack(spacing: 10) {
+                        LazyVStack(spacing: 12) {
                             ForEach(filteredLogs) { entry in
                                 packetLogCard(entry)
                             }
@@ -555,6 +575,7 @@ private struct PacketInspectorSheet: View {
                     Button("Đóng") {
                         dismiss()
                     }
+                    .font(.body.weight(.semibold))
                     .frame(minWidth: MeshTheme.minTapDimension, minHeight: MeshTheme.minTapDimension)
                 }
             }
@@ -614,7 +635,7 @@ private struct PacketInspectorSheet: View {
                     .textSelection(.enabled)
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(MeshTheme.background, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .background(MeshTheme.background, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                     .padding(.top, 4)
             }
             .font(.caption.weight(.medium))

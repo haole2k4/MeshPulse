@@ -2,45 +2,46 @@
 import MeshCore
 import SwiftUI
 
-/// Design tokens and tactical telemetry components for MeshPulse (OLED Dark Mode).
+/// Design tokens and Apple Human Interface Guidelines components for MeshPulse (OLED Dark Mode).
 public enum MeshTheme {
-    // MARK: - Surface Tokens (OLED Tactical Dark)
+    // MARK: - Surface Tokens (OLED Tactical Apple Dark)
 
-    /// Primary canvas `#0B0E14`
-    public static let background = Color(red: 0x0B / 255.0, green: 0x0E / 255.0, blue: 0x14 / 255.0)
-    /// Card container `#151922`
-    public static let cardSurface = Color(red: 0x15 / 255.0, green: 0x19 / 255.0, blue: 0x22 / 255.0)
-    /// Elevated / interactive control surface `#1C2230`
-    public static let elevatedSurface = Color(red: 0x1C / 255.0, green: 0x22 / 255.0, blue: 0x30 / 255.0)
-    /// Single elevation separator — 1pt crisp hairline (no stacked glow/shadow)
+    /// Primary deep canvas `#05070B`
+    public static let background = Color(red: 0x05 / 255.0, green: 0x07 / 255.0, blue: 0x0B / 255.0)
+    /// Card container `#141722`
+    public static let cardSurface = Color(red: 0x14 / 255.0, green: 0x17 / 255.0, blue: 0x22 / 255.0)
+    /// Elevated / interactive control surface `#1E2330`
+    public static let elevatedSurface = Color(red: 0x1E / 255.0, green: 0x23 / 255.0, blue: 0x30 / 255.0)
+    /// Single elevation separator — 0.8pt crisp specular edge (light catching the material)
     public static let hairlineBorder = Color.white.opacity(0.08)
-    public static let strongBorder = Color.white.opacity(0.15)
+    public static let strongBorder = Color.white.opacity(0.16)
 
-    // MARK: - Semantic Signal Tokens
+    // MARK: - Semantic Signal Tokens (Apple Vibrant Palette)
 
-    /// 1-Hop Direct Link (`#10B981`)
-    public static let p2pGreen = Color(red: 0x10 / 255.0, green: 0xB9 / 255.0, blue: 0x81 / 255.0)
-    /// 2+ Hops Relayed Route (`#F59E0B`)
-    public static let meshAmber = Color(red: 0xF5 / 255.0, green: 0x9E / 255.0, blue: 0x0B / 255.0)
-    /// Store-and-Forward DTN Outbox / Simulation (`#6366F1`)
-    public static let dtnIndigo = Color(red: 0x63 / 255.0, green: 0x66 / 255.0, blue: 0xF1 / 255.0)
-    /// Emergency SOS Signal & Disconnected Alert (`#EF4444`)
-    public static let sosCrimson = Color(red: 0xEF / 255.0, green: 0x44 / 255.0, blue: 0x44 / 255.0)
+    /// 1-Hop Direct Link (Apple System Green `#30D158`)
+    public static let p2pGreen = Color(red: 0x30 / 255.0, green: 0xD1 / 255.0, blue: 0x58 / 255.0)
+    /// 2+ Hops Relayed Route (Apple System Amber `#FF9F0A`)
+    public static let meshAmber = Color(red: 0xFF / 255.0, green: 0x9F / 255.0, blue: 0x0A / 255.0)
+    /// Store-and-Forward DTN Outbox / Simulation (Apple System Indigo `#6466F1`)
+    public static let dtnIndigo = Color(red: 0x64 / 255.0, green: 0x66 / 255.0, blue: 0xF1 / 255.0)
+    /// Emergency SOS Signal & Disconnected Alert (Apple System Red `#FF453A`)
+    public static let sosCrimson = Color(red: 0xFF / 255.0, green: 0x45 / 255.0, blue: 0x3A / 255.0)
 
     // MARK: - High-Contrast Typography Colors (WCAG AA >= 4.5:1)
 
-    /// Primary foreground `#F3F4F6` (~16.8:1 on `#0B0E14`)
-    public static let primaryText = Color(red: 0xF3 / 255.0, green: 0xF4 / 255.0, blue: 0xF6 / 255.0)
-    /// Secondary foreground `#9CA3AF` (~6.4:1 on `#151922`)
-    public static let secondaryText = Color(red: 0x9C / 255.0, green: 0xA3 / 255.0, blue: 0xAF / 255.0)
+    /// Primary foreground `#F5F6F8`
+    public static let primaryText = Color(red: 0xF5 / 255.0, green: 0xF6 / 255.0, blue: 0xF8 / 255.0)
+    /// Secondary foreground `#9EABB8`
+    public static let secondaryText = Color(red: 0x9E / 255.0, green: 0xAB / 255.0, blue: 0xB8 / 255.0)
     /// Cool slate tertiary foreground `#CBD5E1` for colored badges
     public static let badgeText = Color(red: 0xCB / 255.0, green: 0xD5 / 255.0, blue: 0xE1 / 255.0)
 
-    // MARK: - Geometry & Motion Constants
+    // MARK: - Geometry & Motion Constants (WWDC Fluid Interfaces)
 
-    public static let cardCornerRadius: CGFloat = 14
+    public static let cardCornerRadius: CGFloat = 16
     public static let minTapDimension: CGFloat = 44
-    public static let fluidSpring = Animation.spring(response: 0.32, dampingFraction: 1.0)
+    /// Critically damped response (damping 1.0, response 0.32s)
+    public static let fluidSpring = Animation.spring(response: 0.32, dampingFraction: 0.88)
 
     public static func animation(reduceMotion: Bool) -> Animation {
         reduceMotion ? .easeOut(duration: 0.16) : fluidSpring
@@ -69,23 +70,60 @@ public enum MeshTheme {
     }
 }
 
+// MARK: - Apple Pressable Button Style (Instant response on pointer-down)
+
+public struct ApplePressableButtonStyle: ButtonStyle {
+    public let scaleDown: CGFloat
+    public let pressedOpacity: CGFloat
+
+    public init(scaleDown: CGFloat = 0.96, pressedOpacity: CGFloat = 0.86) {
+        self.scaleDown = scaleDown
+        self.pressedOpacity = pressedOpacity
+    }
+
+    public func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? scaleDown : 1.0)
+            .opacity(configuration.isPressed ? pressedOpacity : 1.0)
+            .animation(.spring(response: 0.22, dampingFraction: 0.76), value: configuration.isPressed)
+    }
+}
+
+extension ButtonStyle where Self == ApplePressableButtonStyle {
+    public static var applePressable: ApplePressableButtonStyle {
+        ApplePressableButtonStyle()
+    }
+
+    public static func applePressable(scaleDown: CGFloat = 0.96, pressedOpacity: CGFloat = 0.86) -> ApplePressableButtonStyle {
+        ApplePressableButtonStyle(scaleDown: scaleDown, pressedOpacity: pressedOpacity)
+    }
+}
+
 // MARK: - Surface ViewModifier
 
 public struct MeshCardModifier: ViewModifier {
     public let isElevated: Bool
     public let borderColor: Color
+    public let cornerRadius: CGFloat
 
-    public init(isElevated: Bool = false, borderColor: Color = MeshTheme.hairlineBorder) {
+    public init(
+        isElevated: Bool = false,
+        borderColor: Color = MeshTheme.hairlineBorder,
+        cornerRadius: CGFloat = MeshTheme.cardCornerRadius
+    ) {
         self.isElevated = isElevated
         self.borderColor = borderColor
+        self.cornerRadius = cornerRadius
     }
 
     public func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: MeshTheme.cardCornerRadius, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         content
-            .background(isElevated ? MeshTheme.elevatedSurface : MeshTheme.cardSurface, in: shape)
+            .background {
+                shape.fill(isElevated ? MeshTheme.elevatedSurface : MeshTheme.cardSurface)
+            }
             .overlay {
-                shape.strokeBorder(borderColor, lineWidth: 1)
+                shape.strokeBorder(borderColor, lineWidth: 0.8)
             }
     }
 }
@@ -93,9 +131,10 @@ public struct MeshCardModifier: ViewModifier {
 extension View {
     public func meshCard(
         elevated: Bool = false,
-        borderColor: Color = MeshTheme.hairlineBorder
+        borderColor: Color = MeshTheme.hairlineBorder,
+        cornerRadius: CGFloat = MeshTheme.cardCornerRadius
     ) -> some View {
-        modifier(MeshCardModifier(isElevated: elevated, borderColor: borderColor))
+        modifier(MeshCardModifier(isElevated: elevated, borderColor: borderColor, cornerRadius: cornerRadius))
     }
 }
 
@@ -115,15 +154,15 @@ public struct LinkStatusBadge: View {
             Image(systemName: symbolName)
                 .imageScale(.small)
             Text(labelText)
-                .font(.caption.weight(.semibold))
+                .font(.caption2.weight(.semibold))
                 .monospacedDigit()
         }
         .foregroundStyle(accent)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4.5)
         .background(accent.opacity(0.14), in: Capsule())
         .overlay {
-            Capsule().strokeBorder(accent.opacity(0.32), lineWidth: 1)
+            Capsule().strokeBorder(accent.opacity(0.28), lineWidth: 0.8)
         }
     }
 
@@ -170,7 +209,7 @@ public struct HopPathBadge: View {
     }
 
     public var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 5) {
             Image(systemName: iconName)
                 .imageScale(.small)
                 .foregroundStyle(accentColor)
@@ -188,7 +227,7 @@ public struct HopPathBadge: View {
 
             if let rttMs {
                 Text("\(rttMs)ms")
-                    .font(.caption2.monospaced())
+                    .font(.caption2.monospacedDigit())
                     .foregroundStyle(MeshTheme.secondaryText)
             }
 
@@ -203,7 +242,7 @@ public struct HopPathBadge: View {
         .padding(.vertical, 3)
         .background(MeshTheme.elevatedSurface.opacity(0.85), in: Capsule())
         .overlay {
-            Capsule().strokeBorder(accentColor.opacity(0.24), lineWidth: 1)
+            Capsule().strokeBorder(accentColor.opacity(0.24), lineWidth: 0.8)
         }
     }
 
@@ -275,21 +314,21 @@ public struct GeoLocationLinkChip: View {
 
                 Spacer(minLength: 4)
 
-                Image(systemName: "arrow.up.right.square")
+                Image(systemName: "arrow.up.right.square.fill")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(tint)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 7)
             .frame(minHeight: MeshTheme.minTapDimension)
-            .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(tint.opacity(0.35), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(tint.opacity(0.32), lineWidth: 0.8)
             }
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.applePressable)
         .accessibilityLabel("Vị trí GPS \(formattedCoords), sai số \(Int(coordinate.accuracyMeters.rounded())) mét")
         .accessibilityHint("Chạm để mở vị trí trong Apple Maps")
     }
@@ -303,6 +342,21 @@ public struct GeoLocationLinkChip: View {
     private var appleMapsURL: URL? {
         let encodedTitle = label.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "MeshPulse"
         return URL(string: "maps://?ll=\(coordinate.latitude),\(coordinate.longitude)&q=\(encodedTitle)")
+    }
+}
+
+// MARK: - Extension for RoutingStrategy SF Symbols
+
+extension RoutingStrategy {
+    public var systemImage: String {
+        switch self {
+        case .managedFlooding:
+            "point.3.connected.trianglepath.dotted"
+        case .sprayAndWait:
+            "arrow.triangle.branch"
+        case .epidemic:
+            "arrow.triangle.2.circlepath"
+        }
     }
 }
 #endif
