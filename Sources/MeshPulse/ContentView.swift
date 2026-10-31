@@ -1,6 +1,10 @@
 #if canImport(SwiftUI)
 import SwiftUI
 
+/// Main container view for MeshPulse.
+/// - Standard clean iOS NavigationBar and Status Bar (no fake Dynamic Island overlay)
+/// - Floating Glass Capsule TabBar attached via `.safeAreaInset(edge: .bottom)` on root screens
+/// - TabBar automatically hides when navigating into detail screens (1-1 Chat, etc.)
 public struct ContentView: View {
     @Bindable public var coordinator: MeshCoordinator
 
@@ -9,41 +13,28 @@ public struct ContentView: View {
     }
 
     public var body: some View {
-        VStack(spacing: 0) {
-            TopStatusHeader(coordinator: coordinator)
-
-            TabView(selection: $coordinator.selectedTab) {
-                TopologyRadarTab(coordinator: coordinator)
-                    .tabItem {
-                        Label(AppTab.topology.title, systemImage: AppTab.topology.systemImage)
-                    }
-                    .tag(AppTab.topology)
-
-                BroadcastChatTab(coordinator: coordinator)
-                    .tabItem {
-                        Label(AppTab.broadcast.title, systemImage: AppTab.broadcast.systemImage)
-                    }
-                    .tag(AppTab.broadcast)
-
-                DirectMessagesTab(coordinator: coordinator)
-                    .tabItem {
-                        Label(AppTab.direct.title, systemImage: AppTab.direct.systemImage)
-                    }
-                    .tag(AppTab.direct)
-
+        Group {
+            switch coordinator.selectedTab {
+            case .messages:
+                MessagesTab(coordinator: coordinator)
+            case .nodes:
+                NodesTab(coordinator: coordinator)
+            case .map:
+                MapTab(coordinator: coordinator)
+            case .lab:
                 MeshLabTab(coordinator: coordinator)
-                    .tabItem {
-                        Label(AppTab.lab.title, systemImage: AppTab.lab.systemImage)
-                    }
-                    .tag(AppTab.lab)
             }
-            #if os(iOS)
-            .toolbarBackground(.ultraThinMaterial, for: .tabBar)
-            .toolbarBackground(.visible, for: .tabBar)
-            #endif
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !coordinator.isDetailViewActive {
+                FloatingGlassTabBar(coordinator: coordinator)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: coordinator.isDetailViewActive)
         .background(MeshTheme.background.ignoresSafeArea())
-        .tint(MeshTheme.p2pGreen)
+        .tint(MeshTheme.emerald)
         .preferredColorScheme(.dark)
     }
 }

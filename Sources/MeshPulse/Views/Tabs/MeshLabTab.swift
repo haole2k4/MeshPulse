@@ -2,14 +2,17 @@
 import MeshCore
 import SwiftUI
 
-/// Tab 4 (`Mesh Lab`): Interactive testbed for Mock vs Live Multipeer switching,
-/// MANET/DTN routing strategies, Topology Blocker & physical link severing,
-/// live Telemetry counters, and JSON `Packet Inspector`.
+/// Tab 4 (`Mesh Lab / Settings`): Native iOS `.insetGrouped` settings and testbed:
+/// - Inset Grouped list style matching Apple Settings
+/// - Colored SF Symbols on the left, attribute name in the middle, and switches/values on the right
+/// - Mock mode, Routing Strategies, Topology Blocker, Telemetry counters, and Packet Inspector
 public struct MeshLabTab: View {
     public var coordinator: MeshCoordinator
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isShowingPacketInspector = false
+    @State private var isShowingRenameAlert = false
+    @State private var draftDisplayName = ""
     @State private var resetFeedbackCount = 0
 
     public init(coordinator: MeshCoordinator) {
@@ -17,543 +20,424 @@ public struct MeshLabTab: View {
     }
 
     public var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                operatingModeSection
+        NavigationStack {
+            List {
+                // Section 1: Hardware & Operating Mode
+                operatingSection
+
+                // Section 2: Routing Strategies
                 routingStrategySection
-                topologyControlSection
+
+                // Section 3: Topology Blocker (1-Hop Link Severing)
+                topologyBlockerSection
+
+                // Section 4: Real-Time Telemetry Counters
                 telemetrySection
-                packetInspectorSection
+
+                // Section 5: Packet Inspector & Diagnostics
+                diagnosticsSection
+
+                // Clearance Spacer so bottom items scroll completely above Floating Glass TabBar
+                Section {
+                    Color.clear
+                        .frame(height: 84)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
-            .padding(.bottom, 32)
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(MeshTheme.background)
+            .navigationTitle("Mesh Lab")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.large)
+            #endif
         }
-        .background(MeshTheme.background)
         .sheet(isPresented: $isShowingPacketInspector) {
             PacketInspectorSheet(coordinator: coordinator)
+        }
+        .alert("Đổi tên hiển thị", isPresented: $isShowingRenameAlert) {
+            TextField("Biệt danh trạm", text: $draftDisplayName)
+                .textInputAutocapitalization(.words)
+                .autocorrectionDisabled()
+            Button("Hủy", role: .cancel) {}
+            Button("Lưu") {
+                coordinator.updateDisplayName(draftDisplayName)
+            }
+        } message: {
+            Text("Tên hiển thị sẽ được quảng bá tới các nút lân cận trong mạng.")
         }
         .sensoryFeedback(.impact(weight: .medium), trigger: resetFeedbackCount)
     }
 
-    // MARK: - 1. Operating Mode (Mock vs Live Multipeer)
+    // MARK: - Section 1: Hardware & Operating Mode
 
-    private var operatingModeSection: some View {
-        let mockBinding = Binding<Bool>(
-            get: { coordinator.isMockMode },
-            set: { newValue in
-                withAnimation(MeshTheme.animation(reduceMotion: reduceMotion)) {
-                    coordinator.setMockMode(newValue)
+    private var operatingSection: some View {
+        Section("VẬN HÀNH & SÓNG NGOẠI TUYẾN") {
+            // Radio Power Toggle
+            Toggle(isOn: Binding(
+                get: { coordinator.isRadioEnabled },
+                set: { _ in
+                    withAnimation(MeshTheme.animation(reduceMotion: reduceMotion)) {
+                        coordinator.toggleRadio()
+                    }
+                }
+            )) {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Sóng Ngoại tuyến (Radio)")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(MeshTheme.primaryText)
+                        Text(coordinator.isRadioEnabled ? "BLE + Wi-Fi Direct (AWDL) đang phát" : "Đã ngắt toàn bộ sóng")
+                            .font(.caption2)
+                            .foregroundStyle(MeshTheme.secondaryText)
+                    }
+                } icon: {
+                    settingIcon("antenna.radiowaves.left.and.right", color: coordinator.isRadioEnabled ? MeshTheme.emerald : MeshTheme.sosCrimson)
                 }
             }
-        )
+            .tint(MeshTheme.emerald)
 
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Label("Chế độ Vận hành", systemImage: "cpu.fill")
-                    .font(.headline)
-                    .foregroundStyle(MeshTheme.primaryText)
-
-                Spacer()
-
-                Text(coordinator.isMockMode ? "MOCK 3-NODE" : "LIVE RADIO")
-                    .font(.caption2.monospaced().weight(.bold))
-                    .foregroundStyle(coordinator.isMockMode ? MeshTheme.dtnIndigo : MeshTheme.p2pGreen)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 4)
-                    .background(
-                        (coordinator.isMockMode ? MeshTheme.dtnIndigo : MeshTheme.p2pGreen).opacity(0.16),
-                        in: Capsule()
-                    )
-            }
-
-            Toggle(isOn: mockBinding) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Mạng Mô phỏng 3 Trạm (Mock Mode)")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(MeshTheme.primaryText)
-
-                    Text(
-                        coordinator.isMockMode
-                            ? "Đang giả lập 3 nút (Bạn, iPhone-B, iPhone-C) với tự động phản hồi ACK & bắc cầu ngay trên 1 máy."
-                            : "Đang chạy bộ định tuyến phần cứng thực (MultipeerConnectivity BLE + AWDL)."
-                    )
-                    .font(.caption)
-                    .foregroundStyle(MeshTheme.secondaryText)
+            // Mock Mode Toggle
+            Toggle(isOn: Binding(
+                get: { coordinator.isMockMode },
+                set: { newValue in
+                    withAnimation(MeshTheme.animation(reduceMotion: reduceMotion)) {
+                        coordinator.setMockMode(newValue)
+                    }
+                }
+            )) {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Mô phỏng 3 Trạm (Mock Mode)")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(MeshTheme.primaryText)
+                        Text(coordinator.isMockMode ? "Giả lập Bạn, iPhone-B, iPhone-C" : "Phần cứng thật MultipeerConnectivity")
+                            .font(.caption2)
+                            .foregroundStyle(MeshTheme.secondaryText)
+                    }
+                } icon: {
+                    settingIcon("cpu.fill", color: coordinator.isMockMode ? MeshTheme.dtnIndigo : MeshTheme.emerald)
                 }
             }
             .tint(MeshTheme.dtnIndigo)
-            .frame(minHeight: MeshTheme.minTapDimension)
-            .sensoryFeedback(.selection, trigger: coordinator.isMockMode)
 
-            if !coordinator.isMockMode, let statusNote = coordinator.radioStatusNote {
-                HStack(spacing: 8) {
-                    Image(systemName: "info.circle.fill")
-                        .font(.caption)
-                        .foregroundStyle(MeshTheme.meshAmber)
-                    Text(statusNote)
-                        .font(.caption)
+            // Display Name Row
+            Button {
+                draftDisplayName = coordinator.localDisplayName
+                isShowingRenameAlert = true
+            } label: {
+                HStack {
+                    Label {
+                        Text("Tên trạm hiển thị")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(MeshTheme.primaryText)
+                    } icon: {
+                        settingIcon("person.fill", color: MeshTheme.emerald)
+                    }
+
+                    Spacer()
+
+                    Text(coordinator.localDisplayName)
+                        .font(.system(size: 14))
                         .foregroundStyle(MeshTheme.secondaryText)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(MeshTheme.secondaryText.opacity(0.6))
                 }
-                .padding(11)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(MeshTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .buttonStyle(.plain)
+
+            // Node ID Row
+            HStack {
+                Label {
+                    Text("Định danh trạm")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(MeshTheme.primaryText)
+                } icon: {
+                    settingIcon("number", color: MeshTheme.secondaryText)
+                }
+
+                Spacer()
+
+                Text(coordinator.localNodeID)
+                    .font(.system(size: 13, design: .monospaced))
+                    .foregroundStyle(MeshTheme.secondaryText)
             }
         }
-        .padding(14)
-        .meshCard()
     }
 
-    // MARK: - 2. MANET / DTN Routing Strategy
+    // MARK: - Section 2: Routing Strategies
 
     private var routingStrategySection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Chiến lược Định tuyến & DTN", systemImage: "arrow.triangle.branch")
-                .font(.headline)
-                .foregroundStyle(MeshTheme.primaryText)
-
+        Section("CHIẾN LƯỢC ĐỊNH TUYẾN (MANET & DTN)") {
             ForEach(RoutingStrategy.allCases) { strategy in
-                let isSelected = (coordinator.routingStrategy == strategy)
+                let isSelected = coordinator.routingStrategy == strategy
+
                 Button {
                     withAnimation(MeshTheme.animation(reduceMotion: reduceMotion)) {
                         coordinator.setRoutingStrategy(strategy)
                     }
                 } label: {
-                    HStack(alignment: .top, spacing: 12) {
-                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(isSelected ? MeshTheme.p2pGreen : MeshTheme.secondaryText)
-                            .padding(.top, 2)
+                    HStack(spacing: 12) {
+                        settingIcon(strategy.systemImage, color: isSelected ? MeshTheme.emerald : MeshTheme.secondaryText)
 
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack(spacing: 6) {
-                                Image(systemName: strategy.systemImage)
-                                    .font(.caption.weight(.bold))
-                                    .foregroundStyle(isSelected ? MeshTheme.p2pGreen : MeshTheme.secondaryText)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(strategy.title)
+                                .font(.system(size: 15, weight: isSelected ? .bold : .semibold))
+                                .foregroundStyle(isSelected ? MeshTheme.emerald : MeshTheme.primaryText)
 
-                                Text(strategy.title)
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(MeshTheme.primaryText)
-                            }
-
-                            Text(strategy.subtitle)
-                                .font(.caption)
+                            Text(strategyDescription(strategy))
+                                .font(.caption2)
                                 .foregroundStyle(MeshTheme.secondaryText)
-                                .multilineTextAlignment(.leading)
                         }
 
-                        Spacer(minLength: 0)
+                        Spacer()
+
+                        if isSelected {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(MeshTheme.emerald)
+                        }
                     }
-                    .padding(12)
-                    .frame(maxWidth: .infinity, minHeight: MeshTheme.minTapDimension, alignment: .leading)
-                    .background(
-                        isSelected ? MeshTheme.p2pGreen.opacity(0.12) : MeshTheme.elevatedSurface,
-                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    )
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(
-                                isSelected ? MeshTheme.p2pGreen.opacity(0.45) : MeshTheme.hairlineBorder,
-                                lineWidth: 0.8
-                            )
-                    }
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.applePressable)
+                .buttonStyle(.plain)
             }
         }
-        .padding(14)
-        .meshCard()
-        .sensoryFeedback(.selection, trigger: coordinator.routingStrategy)
     }
 
-    // MARK: - 3. Topology Blocker & Mock Physical Links
+    // MARK: - Section 3: Topology Blocker
 
-    private var topologyControlSection: some View {
-        let labPeers = coordinator.controllableLabPeers
+    private var topologyBlockerSection: some View {
+        Section("TOPOLOGY BLOCKER (CẮT ĐỨT LIÊN KẾT 1-HOP)") {
+            Text("Chặn nhận gói tin trực tiếp 1-Hop để ép bản tin phải chuyển tiếp vòng qua các máy khác.")
+                .font(.caption2)
+                .foregroundStyle(MeshTheme.secondaryText)
 
-        return VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 4) {
-                Label("Kiểm soát Địa hình & Topology Blocker", systemImage: "hand.raised.slash.fill")
-                    .font(.headline)
-                    .foregroundStyle(MeshTheme.primaryText)
-
-                Text("Chặn kết nối trực tiếp 1-Hop ở tầng thu để ép gói tin phải đi đường vòng Multi-Hop qua trạm trung gian ngay trên bàn làm việc.")
+            let peers = coordinator.controllableLabPeers
+            if peers.isEmpty {
+                Text("Không có trạm lân cận để cấu hình")
                     .font(.caption)
                     .foregroundStyle(MeshTheme.secondaryText)
-            }
-
-            if labPeers.isEmpty {
-                Text("Chưa có trạm lân cận nào để cấu hình chặn trực tiếp.")
-                    .font(.caption)
-                    .foregroundStyle(MeshTheme.secondaryText)
-                    .padding(.vertical, 6)
             } else {
-                VStack(spacing: 8) {
-                    ForEach(labPeers) { peer in
-                        blockerToggleRow(peer)
+                ForEach(peers) { peer in
+                    let isBlocked = coordinator.isPeerBlocked(peer.id)
+
+                    Toggle(isOn: Binding(
+                        get: { isBlocked },
+                        set: { blocked in
+                            withAnimation(MeshTheme.animation(reduceMotion: reduceMotion)) {
+                                coordinator.setPeerBlocked(peer.id, isBlocked: blocked)
+                            }
+                        }
+                    )) {
+                        Label {
+                            VStack(alignment: .leading, spacing: 1) {
+                                HStack(spacing: 6) {
+                                    Text(peer.identity.displayName)
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(MeshTheme.primaryText)
+
+                                    if isBlocked {
+                                        Text("CHẶN")
+                                            .font(.system(size: 9, weight: .heavy, design: .monospaced))
+                                            .foregroundStyle(MeshTheme.sosCrimson)
+                                    }
+                                }
+                                Text(peer.identity.nodeID.prefix(12) + "…")
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(MeshTheme.secondaryText)
+                            }
+                        } icon: {
+                            settingIcon(isBlocked ? "slash.circle.fill" : "link", color: isBlocked ? MeshTheme.sosCrimson : MeshTheme.emerald)
+                        }
                     }
-                }
-            }
-
-            if coordinator.isMockMode {
-                Divider()
-                    .overlay(MeshTheme.hairlineBorder)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "cable.connector.horizontal")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(MeshTheme.dtnIndigo)
-                        Text("Liên kết Vật lý Mô phỏng (Thử nghiệm Data Mule DTN)")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(MeshTheme.primaryText)
-                    }
-
-                    Text("Ngắt liên kết để cô lập trạm đích (tin nhắn tự lưu vào Hộp thư chờ DTN), sau đó nối lại để xem tự động đồng bộ bù.")
-                        .font(.caption)
-                        .foregroundStyle(MeshTheme.secondaryText)
-
-                    mockPhysicalLinkRow(
-                        title: "\(coordinator.localDisplayName) (A) — iPhone-B",
-                        peerA: SimulatedMeshNetwork.nodeAID,
-                        peerB: SimulatedMeshNetwork.nodeBID
-                    )
-                    mockPhysicalLinkRow(
-                        title: "iPhone-B — iPhone-C",
-                        peerA: SimulatedMeshNetwork.nodeBID,
-                        peerB: SimulatedMeshNetwork.nodeCID
-                    )
-                    mockPhysicalLinkRow(
-                        title: "\(coordinator.localDisplayName) (A) — iPhone-C",
-                        peerA: SimulatedMeshNetwork.nodeAID,
-                        peerB: SimulatedMeshNetwork.nodeCID
-                    )
+                    .tint(MeshTheme.sosCrimson)
                 }
             }
         }
-        .padding(14)
-        .meshCard()
     }
 
-    private func blockerToggleRow(_ peer: PeerSummary) -> some View {
-        let isBlocked = coordinator.isPeerBlocked(peer.id)
-        let binding = Binding<Bool>(
-            get: { isBlocked },
-            set: { blocked in
-                withAnimation(MeshTheme.animation(reduceMotion: reduceMotion)) {
-                    coordinator.setPeerBlocked(peer.id, isBlocked: blocked)
-                }
-            }
-        )
-
-        return Toggle(isOn: binding) {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text("Chặn 1-Hop: \(peer.identity.displayName)")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(MeshTheme.primaryText)
-
-                    if isBlocked {
-                        Text("ĐÃ CHẶN")
-                            .font(.caption2.monospaced().weight(.bold))
-                            .foregroundStyle(MeshTheme.sosCrimson)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(MeshTheme.sosCrimson.opacity(0.16), in: Capsule())
-                    }
-                }
-
-                Text("\(peer.identity.nodeID.prefix(12))… · \(linkSummaryText(peer.linkKind))")
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(MeshTheme.secondaryText)
-            }
-        }
-        .tint(MeshTheme.sosCrimson)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .frame(minHeight: MeshTheme.minTapDimension)
-        .background(MeshTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .sensoryFeedback(.selection, trigger: isBlocked)
-    }
-
-    private func mockPhysicalLinkRow(title: String, peerA: String, peerB: String) -> some View {
-        let isConnected = coordinator.hasPhysicalLinkInMock(peerA, peerB)
-        let binding = Binding<Bool>(
-            get: { isConnected },
-            set: { connected in
-                withAnimation(MeshTheme.animation(reduceMotion: reduceMotion)) {
-                    coordinator.setPhysicalLinkInMock(peerA, peerB, isConnected: connected)
-                }
-            }
-        )
-
-        return Toggle(isOn: binding) {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(isConnected ? MeshTheme.p2pGreen : MeshTheme.sosCrimson)
-                    .frame(width: 8, height: 8)
-                Text(title)
-                    .font(.caption.monospaced().weight(.semibold))
-                    .foregroundStyle(MeshTheme.primaryText)
-            }
-        }
-        .tint(MeshTheme.p2pGreen)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .frame(minHeight: MeshTheme.minTapDimension)
-        .background(MeshTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .sensoryFeedback(.selection, trigger: isConnected)
-    }
-
-    private func linkSummaryText(_ kind: LinkKind) -> String {
-        switch kind {
-        case .directP2P:
-            "Trực tiếp 1-Hop"
-        case let .relayedMesh(_, viaName, hops):
-            "\(hops)-Hop qua \(viaName)"
-        case .offlineDTN:
-            "Ngoại tuyến DTN"
-        }
-    }
-
-    // MARK: - 4. Real-Time Telemetry Grid (2x2)
+    // MARK: - Section 4: Real-Time Telemetry
 
     private var telemetrySection: some View {
         let stats = coordinator.telemetry
-        let columns = [
-            GridItem(.flexible(), spacing: 10),
-            GridItem(.flexible(), spacing: 10),
-        ]
 
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("Đo kiểm Telemetry Thời gian thực", systemImage: "chart.bar.xaxis")
-                    .font(.headline)
-                    .foregroundStyle(MeshTheme.primaryText)
+        return Section("THÔNG SỐ VIỄN TRẮC (TELEMETRY)") {
+            telemetryRow(title: "Gói tin đã gửi (TX)", value: "\(stats.txPackets)", icon: "arrow.up.circle.fill", color: MeshTheme.emerald)
+            telemetryRow(title: "Gói tin đã nhận (RX)", value: "\(stats.rxPackets)", icon: "arrow.down.circle.fill", color: MeshTheme.emeraldLight)
+            telemetryRow(title: "Gói tin bắc cầu (Relayed)", value: "\(stats.relayedPackets)", icon: "point.3.connected.trianglepath.dotted", color: MeshTheme.meshAmber)
+            telemetryRow(title: "Lọc bỏ trùng lặp (Dropped)", value: "\(stats.droppedDuplicates)", icon: "xmark.circle.fill", color: MeshTheme.secondaryText)
+            telemetryRow(title: "Gói tin chặn Ingress (Blocked)", value: "\(stats.blockedIngressDrops)", icon: "slash.circle.fill", color: MeshTheme.sosCrimson)
 
-                Spacer()
+            Button {
+                resetFeedbackCount += 1
+                coordinator.resetTelemetry()
+            } label: {
+                HStack {
+                    Label("Đặt lại bộ đếm Telemetry", systemImage: "arrow.counterclockwise")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(MeshTheme.secondaryText)
+                    Spacer()
+                }
+            }
+            .buttonStyle(.plain)
+        }
+    }
 
+    // MARK: - Section 5: Diagnostics
+
+    private var diagnosticsSection: some View {
+        Section("NHẬT KÝ & KIỂM TRA GÓI TIN") {
+            Button {
+                isShowingPacketInspector = true
+            } label: {
+                HStack {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Xem Packet Inspector")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(MeshTheme.primaryText)
+                            Text("Xem luồng gói tin JSON thô thời gian thực")
+                                .font(.caption2)
+                                .foregroundStyle(MeshTheme.secondaryText)
+                        }
+                    } icon: {
+                        settingIcon("doc.text.magnifyingglass", color: MeshTheme.emerald)
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(MeshTheme.secondaryText.opacity(0.6))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if coordinator.isMockMode {
                 Button {
                     resetFeedbackCount += 1
-                    coordinator.resetTelemetry()
+                    coordinator.resetMockScenario()
                 } label: {
-                    Label("Đặt lại", systemImage: "arrow.counterclockwise")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(MeshTheme.secondaryText)
-                        .padding(.horizontal, 12)
-                        .frame(minHeight: 32)
-                        .background(MeshTheme.elevatedSurface, in: Capsule())
-                        .overlay {
-                            Capsule().strokeBorder(MeshTheme.hairlineBorder, lineWidth: 0.8)
+                    HStack {
+                        Label {
+                            Text("Khôi phục kịch bản mô phỏng gốc")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(MeshTheme.sosCrimson)
+                        } icon: {
+                            settingIcon("arrow.triangle.2.circlepath", color: MeshTheme.sosCrimson)
                         }
-                        .contentShape(Capsule())
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.applePressable)
-                .accessibilityLabel("Đặt lại bộ đếm thống kê Telemetry")
-            }
-
-            LazyVGrid(columns: columns, spacing: 10) {
-                telemetryMetricTile(
-                    title: "Gói phát / nhận",
-                    value: "TX \(stats.txPackets) · RX \(stats.rxPackets)",
-                    symbol: "arrow.up.arrow.down.circle.fill",
-                    accent: MeshTheme.p2pGreen
-                )
-
-                telemetryMetricTile(
-                    title: "Bắc cầu (Relayed)",
-                    value: "\(stats.relayedPackets)",
-                    symbol: "point.3.connected.trianglepath.dotted",
-                    accent: MeshTheme.meshAmber
-                )
-
-                telemetryMetricTile(
-                    title: "Chống bão & Chặn",
-                    value: "\(stats.droppedDuplicates) trùng · \(stats.blockedIngressDrops) chặn",
-                    symbol: "shield.lefthalf.filled",
-                    accent: MeshTheme.dtnIndigo
-                )
-
-                telemetryMetricTile(
-                    title: "Độ trễ RTT TB",
-                    value: stats.averageRTTMs.map { "\($0) ms" } ?? "-- ms",
-                    symbol: "waveform.path.ecg",
-                    accent: MeshTheme.primaryText
-                )
+                .buttonStyle(.plain)
             }
         }
-        .padding(14)
-        .meshCard()
     }
 
-    private func telemetryMetricTile(
-        title: String,
-        value: String,
-        symbol: String,
-        accent: Color
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                ZStack {
-                    Circle()
-                        .fill(accent.opacity(0.16))
-                        .frame(width: 24, height: 24)
-                    Image(systemName: symbol)
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(accent)
-                }
+    // MARK: - Helpers
 
+    private func settingIcon(_ name: String, color: Color) -> some View {
+        Image(systemName: name)
+            .font(.system(size: 14, weight: .bold))
+            .foregroundStyle(Color.white)
+            .frame(width: 28, height: 28)
+            .background(color, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+    }
+
+    private func telemetryRow(title: String, value: String, icon: String, color: Color) -> some View {
+        HStack {
+            Label {
                 Text(title)
-                    .font(.caption)
-                    .foregroundStyle(MeshTheme.secondaryText)
-                    .lineLimit(1)
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundStyle(MeshTheme.primaryText)
+            } icon: {
+                settingIcon(icon, color: color)
             }
+
+            Spacer()
 
             Text(value)
-                .font(.subheadline.monospacedDigit().weight(.bold))
-                .foregroundStyle(MeshTheme.primaryText)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(MeshTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(MeshTheme.hairlineBorder, lineWidth: 0.8)
+                .font(.system(size: 14, weight: .bold, design: .monospaced))
+                .foregroundStyle(color)
         }
     }
 
-    // MARK: - 5. JSON Packet Inspector Launcher
-
-    private var packetInspectorSection: some View {
-        Button {
-            isShowingPacketInspector = true
-        } label: {
-            HStack(spacing: 12) {
-                ZStack {
-                    Circle()
-                        .fill(MeshTheme.p2pGreen.opacity(0.16))
-                        .frame(width: 36, height: 36)
-                    Image(systemName: "doc.text.magnifyingglass")
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(MeshTheme.p2pGreen)
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Nhật ký Gói tin (Packet Inspector)")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(MeshTheme.primaryText)
-                    Text("Soi khung gói tin MeshPacket JSON, TTL và lộ trình thực tế")
-                        .font(.caption)
-                        .foregroundStyle(MeshTheme.secondaryText)
-                }
-
-                Spacer(minLength: 6)
-
-                Text("\(coordinator.packetLogs.count)")
-                    .font(.caption.monospacedDigit().weight(.bold))
-                    .foregroundStyle(MeshTheme.primaryText)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 4)
-                    .background(MeshTheme.elevatedSurface, in: Capsule())
-
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(MeshTheme.secondaryText)
-            }
-            .padding(14)
-            .frame(minHeight: MeshTheme.minTapDimension)
-            .meshCard()
-            .contentShape(Rectangle())
+    private func strategyDescription(_ strategy: RoutingStrategy) -> String {
+        switch strategy {
+        case .managedFlooding:
+            "Quảng bá lụt kèm bộ nhớ đệm SeenCache ngăn bão mạng."
+        case .sprayAndWait:
+            "Giới hạn số bản sao (quota = 4) rồi chờ kết nối đích."
+        case .epidemic:
+            "Lưu và chuyển tiếp ngoại tuyến qua véc-tơ tóm tắt SummaryVector."
         }
-        .buttonStyle(.applePressable)
     }
 }
 
 // MARK: - Packet Inspector Sheet
 
 private struct PacketInspectorSheet: View {
-    private enum LogFilter: String, CaseIterable, Identifiable {
-        case all = "Tất cả"
-        case tx = "TX"
-        case rx = "RX"
-        case relay = "RELAY"
-        case drop = "DROP"
-
-        var id: String { rawValue }
-
-        func matches(_ direction: PacketLogDirection) -> Bool {
-            switch self {
-            case .all:
-                true
-            case .tx:
-                direction == .tx
-            case .rx:
-                direction == .rx
-            case .relay:
-                direction == .relay
-            case .drop:
-                direction == .dropDuplicate || direction == .dropBlocked || direction == .dropTTL
-            }
-        }
-    }
-
     var coordinator: MeshCoordinator
 
     @Environment(\.dismiss) private var dismiss
-    @State private var selectedFilter: LogFilter = .all
+    @State private var selectedFilter: PacketFilter = .all
+
+    private enum PacketFilter: String, CaseIterable, Identifiable {
+        case all = "Tất cả"
+        case tx = "TX"
+        case rx = "RX"
+        case relay = "Bắc cầu"
+        case drop = "Bỏ qua"
+
+        var id: String { rawValue }
+    }
 
     private var filteredLogs: [PacketLogEntry] {
-        coordinator.packetLogs.filter { selectedFilter.matches($0.direction) }
+        let all = coordinator.packetLogs
+        switch selectedFilter {
+        case .all:
+            return all
+        case .tx:
+            return all.filter { $0.direction == .tx }
+        case .rx:
+            return all.filter { $0.direction == .rx }
+        case .relay:
+            return all.filter { $0.direction == .relay }
+        case .drop:
+            return all.filter {
+                $0.direction == .dropDuplicate || $0.direction == .dropBlocked || $0.direction == .dropTTL
+            }
+        }
     }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(LogFilter.allCases) { filter in
-                            let active = (selectedFilter == filter)
-                            Button {
-                                selectedFilter = filter
-                            } label: {
-                                Text(filter.rawValue)
-                                    .font(.caption.weight(.bold))
-                                    .foregroundStyle(active ? Color.white : MeshTheme.primaryText)
-                                    .padding(.horizontal, 14)
-                                    .frame(minHeight: 34)
-                                    .background(
-                                        active ? MeshTheme.p2pGreen : MeshTheme.elevatedSurface,
-                                        in: Capsule()
-                                    )
-                            }
-                            .buttonStyle(.applePressable)
-                        }
+                Picker("Lọc gói tin", selection: $selectedFilter) {
+                    ForEach(PacketFilter.allCases) { filter in
+                        Text(filter.rawValue).tag(filter)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
                 }
-                .background {
-                    MeshTheme.cardSurface.opacity(0.9)
-                        .background(.ultraThinMaterial)
-                }
-                .overlay(alignment: .bottom) {
-                    Rectangle().fill(MeshTheme.hairlineBorder).frame(height: 0.8)
-                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
 
                 ScrollView {
                     if filteredLogs.isEmpty {
                         VStack(spacing: 12) {
-                            Image(systemName: "tray")
+                            Image(systemName: "tray.fill")
                                 .font(.system(size: 32))
                                 .foregroundStyle(MeshTheme.secondaryText)
                             Text("Không có bản ghi gói tin phù hợp")
-                                .font(.subheadline.weight(.semibold))
+                                .font(.system(size: 15, weight: .semibold))
                                 .foregroundStyle(MeshTheme.primaryText)
                         }
-                        .padding(36)
+                        .padding(40)
                         .frame(maxWidth: .infinity)
                     } else {
                         LazyVStack(spacing: 12) {
@@ -572,16 +456,13 @@ private struct PacketInspectorSheet: View {
             #endif
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Đóng") {
-                        dismiss()
-                    }
-                    .font(.body.weight(.semibold))
-                    .frame(minWidth: MeshTheme.minTapDimension, minHeight: MeshTheme.minTapDimension)
+                    Button("Xong") { dismiss() }
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(MeshTheme.emerald)
                 }
             }
         }
         .preferredColorScheme(.dark)
-        .sensoryFeedback(.selection, trigger: selectedFilter)
     }
 
     private func packetLogCard(_ entry: PacketLogEntry) -> some View {
@@ -589,16 +470,16 @@ private struct PacketInspectorSheet: View {
 
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Text(label(for: entry.direction))
-                    .font(.caption2.monospaced().weight(.bold))
+                Text(entry.direction.rawValue.uppercased())
+                    .font(.system(size: 10, weight: .heavy, design: .monospaced))
                     .foregroundStyle(dirColor)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 3)
                     .background(dirColor.opacity(0.16), in: Capsule())
 
                 Text(entry.packetType.rawValue.uppercased())
-                    .font(.caption2.monospaced().weight(.semibold))
-                    .foregroundStyle(MeshTheme.badgeText)
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(MeshTheme.primaryText)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 3)
                     .background(MeshTheme.elevatedSurface, in: Capsule())
@@ -612,10 +493,9 @@ private struct PacketInspectorSheet: View {
 
             if !entry.routeDisplay.isEmpty {
                 Text(entry.routeDisplay)
-                    .font(.caption.monospaced())
+                    .font(.system(size: 12, design: .monospaced))
                     .foregroundStyle(MeshTheme.primaryText)
                     .lineLimit(1)
-                    .truncationMode(.middle)
             }
 
             HStack {
@@ -628,50 +508,29 @@ private struct PacketInspectorSheet: View {
                     .foregroundStyle(MeshTheme.secondaryText)
             }
 
-            DisclosureGroup("Xem khung JSON thô") {
+            DisclosureGroup("Xem JSON thô") {
                 Text(entry.rawJSON)
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(MeshTheme.badgeText)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(MeshTheme.secondaryText)
                     .textSelection(.enabled)
-                    .padding(10)
+                    .padding(8)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(MeshTheme.background, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .background(MeshTheme.background, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .padding(.top, 4)
             }
             .font(.caption.weight(.medium))
             .foregroundStyle(MeshTheme.secondaryText)
         }
-        .padding(12)
-        .meshCard()
-    }
-
-    private func label(for direction: PacketLogDirection) -> String {
-        switch direction {
-        case .tx:
-            "TX"
-        case .rx:
-            "RX"
-        case .relay:
-            "RELAY"
-        case .dropDuplicate:
-            "DROP·DUP"
-        case .dropBlocked:
-            "DROP·BLK"
-        case .dropTTL:
-            "DROP·TTL"
-        }
+        .padding(14)
+        .background(MeshTheme.cardSurface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private func color(for direction: PacketLogDirection) -> Color {
         switch direction {
-        case .tx:
-            MeshTheme.p2pGreen
-        case .rx:
-            MeshTheme.dtnIndigo
-        case .relay:
-            MeshTheme.meshAmber
-        case .dropDuplicate, .dropBlocked, .dropTTL:
-            MeshTheme.sosCrimson
+        case .tx: return MeshTheme.emerald
+        case .rx: return MeshTheme.dtnIndigo
+        case .relay: return MeshTheme.meshAmber
+        case .dropDuplicate, .dropBlocked, .dropTTL: return MeshTheme.sosCrimson
         }
     }
 }

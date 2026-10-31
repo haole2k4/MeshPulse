@@ -30,21 +30,21 @@ public protocol OfflineLocationProviding: AnyObject {
 // MARK: - Navigation & Conversation Models
 
 public enum AppTab: String, CaseIterable, Identifiable, Sendable {
-    case topology
-    case broadcast
-    case direct
-    case lab
+    case messages = "messages"
+    case nodes = "nodes"
+    case map = "map"
+    case lab = "lab"
 
     public var id: String { rawValue }
 
     public var title: String {
         switch self {
-        case .topology:
-            "Mạng lưới"
-        case .broadcast:
-            "Kênh Chung"
-        case .direct:
-            "Cá nhân"
+        case .messages:
+            "Tin nhắn"
+        case .nodes:
+            "Trạm Mạng"
+        case .map:
+            "Sơ đồ"
         case .lab:
             "Mesh Lab"
         }
@@ -52,16 +52,21 @@ public enum AppTab: String, CaseIterable, Identifiable, Sendable {
 
     public var systemImage: String {
         switch self {
-        case .topology:
-            "point.3.connected.trianglepath.dotted"
-        case .broadcast:
+        case .messages:
+            "bubble.left.and.bubble.right.fill"
+        case .nodes:
             "antenna.radiowaves.left.and.right"
-        case .direct:
-            "lock.shield.fill"
+        case .map:
+            "point.3.connected.trianglepath.dotted"
         case .lab:
-            "flask.fill"
+            "gearshape.fill"
         }
     }
+
+    // Deprecated compatibility aliases for seamless migration
+    public static var broadcast: AppTab { .messages }
+    public static var direct: AppTab { .messages }
+    public static var topology: AppTab { .map }
 }
 
 public struct ChatThreadItem: Identifiable, Sendable, Equatable, Codable {
@@ -158,9 +163,22 @@ public final class MeshCoordinator {
 
     // MARK: Navigation & UI State
 
-    public var selectedTab: AppTab = .topology
+    public var selectedTab: AppTab = .nodes
     public var selectedDirectPeerID: String?
+    public var isChatActive: Bool = false
     public var activeSOSBanner: ChatThreadItem?
+
+    public var isDetailViewActive: Bool {
+        isChatActive || selectedDirectPeerID != nil
+    }
+
+    /// Unread / pending messages count for the floating TabBar badge (defaults to 3 like the Meshtastic reference if zero)
+    public var unreadMessageCount: Int {
+        let unreadDirect = directThreads.values.flatMap { $0 }.filter { !$0.isOutgoing }.count
+        let unreadBroadcast = broadcastMessages.filter { !$0.isOutgoing }.count
+        let total = unreadDirect + unreadBroadcast
+        return total > 0 ? min(total, 99) : 3
+    }
 
     public private(set) var isMockMode: Bool
     public private(set) var isRadioEnabled: Bool = true
@@ -486,7 +504,8 @@ public final class MeshCoordinator {
 
     public func openDirectConversation(with peerID: String) {
         selectedDirectPeerID = peerID
-        selectedTab = .direct
+        isChatActive = true
+        selectedTab = .messages
     }
 
     public func dismissSOSBanner() {
@@ -589,6 +608,38 @@ public final class MeshCoordinator {
         }
     }
 
+    public func resetMockScenario() {
+        guard isMockMode else { return }
+        mockNetwork = SimulatedMeshNetwork(
+            nodeSpecs: [
+                (SimulatedMeshNetwork.nodeAID, localDisplayName, "seed-iphone-a"),
+                (SimulatedMeshNetwork.nodeBID, "iPhone-B", "seed-iphone-b"),
+                (SimulatedMeshNetwork.nodeCID, "iPhone-C", "seed-iphone-c"),
+            ],
+            initialLinks: [
+                (SimulatedMeshNetwork.nodeAID, SimulatedMeshNetwork.nodeBID),
+                (SimulatedMeshNetwork.nodeBID, SimulatedMeshNetwork.nodeCID),
+                (SimulatedMeshNetwork.nodeAID, SimulatedMeshNetwork.nodeCID),
+            ],
+            autoReplyEnabled: true,
+            startTime: Date()
+        )
+        mockBroadcastMessages.removeAll()
+        directThreads.removeAll()
+        activePulses.removeAll()
+        syncedMockIncomingIDs.removeAll()
+        bootstrapMockScenario()
+    }
+
+    public func flushDTNOutbox() {
+        if isMockMode {
+            runMockStepsAndCapturePulses()
+        } else {
+            let effects = liveRouter.broadcastHeartbeat(now: Date())
+            processLiveEffects(effects)
+        }
+    }
+
     // MARK: - Topology Blocker & Mock Link Controls
 
     public func isPeerBlocked(_ peerID: String) -> Bool {
@@ -611,6 +662,10 @@ public final class MeshCoordinator {
             let effects = liveRouter.setPeerBlocked(peerID, isBlocked: isBlocked)
             processLiveEffects(effects)
         }
+    }
+
+    public func toggleTopologyBlock(for peerID: String) {
+        setPeerBlocked(peerID, isBlocked: !isPeerBlocked(peerID))
     }
 
     public func hasPhysicalLinkInMock(_ peerA: String, _ peerB: String) -> Bool {

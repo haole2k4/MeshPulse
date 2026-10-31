@@ -2,3 +2,4 @@ version: 1
 bundleID: com.haole2k4.MeshPulse
 infoPath: Info.plist
 iconPath: AppIcon.png
+NSSupportsLiveActivities: true

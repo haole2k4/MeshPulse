@@ -2,28 +2,35 @@
 import MeshCore
 import SwiftUI
 
-/// Design tokens and Apple Human Interface Guidelines components for MeshPulse (OLED Dark Mode).
+/// Design tokens and Apple Human Interface Guidelines components for MeshPulse (Emerald & Native iOS Standard).
 public enum MeshTheme {
-    // MARK: - Surface Tokens (OLED Tactical Apple Dark)
+    // MARK: - Surface Tokens (OLED Pure Black & Apple Grouped Dark)
 
-    /// Primary deep canvas `#05070B`
-    public static let background = Color(red: 0x05 / 255.0, green: 0x07 / 255.0, blue: 0x0B / 255.0)
-    /// Card container `#141722`
-    public static let cardSurface = Color(red: 0x14 / 255.0, green: 0x17 / 255.0, blue: 0x22 / 255.0)
-    /// Elevated / interactive control surface `#1E2330`
-    public static let elevatedSurface = Color(red: 0x1E / 255.0, green: 0x23 / 255.0, blue: 0x30 / 255.0)
-    /// Single elevation separator — 0.8pt crisp specular edge (light catching the material)
+    /// Primary pure black canvas `#000000`
+    public static let background = Color.black
+    /// Apple Native Grouped Card Surface `#1C1C1E`
+    public static let cardSurface = Color(red: 0x1C / 255.0, green: 0x1C / 255.0, blue: 0x1E / 255.0)
+    /// Elevated / Interactive control surface `#2C2C2E`
+    public static let elevatedSurface = Color(red: 0x2C / 255.0, green: 0x2C / 255.0, blue: 0x2E / 255.0)
+    /// Single subtle separator
     public static let hairlineBorder = Color.white.opacity(0.08)
     public static let strongBorder = Color.white.opacity(0.16)
 
-    // MARK: - Semantic Signal Tokens (Apple Vibrant Palette)
+    // MARK: - Semantic Signal Tokens (Meshtastic Emerald Accent Palette)
 
-    /// 1-Hop Direct Link (Apple System Green `#30D158`)
-    public static let p2pGreen = Color(red: 0x30 / 255.0, green: 0xD1 / 255.0, blue: 0x58 / 255.0)
+    /// Primary Emerald Accent (Meshtastic Clean Emerald `#10B981`)
+    public static let emerald = Color(red: 0x10 / 255.0, green: 0xB9 / 255.0, blue: 0x81 / 255.0)
+    /// Bright Emerald Highlight `#34D399`
+    public static let emeraldLight = Color(red: 0x34 / 255.0, green: 0xD3 / 255.0, blue: 0x99 / 255.0)
+    /// Deep Emerald `#059669`
+    public static let emeraldDark = Color(red: 0x05 / 255.0, green: 0x96 / 255.0, blue: 0x69 / 255.0)
+
+    /// 1-Hop Direct Link (Emerald Accent)
+    public static let p2pGreen = emerald
     /// 2+ Hops Relayed Route (Apple System Amber `#FF9F0A`)
     public static let meshAmber = Color(red: 0xFF / 255.0, green: 0x9F / 255.0, blue: 0x0A / 255.0)
-    /// Store-and-Forward DTN Outbox / Simulation (Apple System Indigo `#6466F1`)
-    public static let dtnIndigo = Color(red: 0x64 / 255.0, green: 0x66 / 255.0, blue: 0xF1 / 255.0)
+    /// Store-and-Forward DTN Outbox / Simulation (Apple System Indigo `#6366F1`)
+    public static let dtnIndigo = Color(red: 0x63 / 255.0, green: 0x66 / 255.0, blue: 0xF1 / 255.0)
     /// Emergency SOS Signal & Disconnected Alert (Apple System Red `#FF453A`)
     public static let sosCrimson = Color(red: 0xFF / 255.0, green: 0x45 / 255.0, blue: 0x3A / 255.0)
 
@@ -99,32 +106,27 @@ extension ButtonStyle where Self == ApplePressableButtonStyle {
     }
 }
 
-// MARK: - Surface ViewModifier
+// MARK: - Surface ViewModifier (Flat Native iOS Surface - No AI Slop Stroke Borders)
 
 public struct MeshCardModifier: ViewModifier {
     public let isElevated: Bool
-    public let borderColor: Color
     public let cornerRadius: CGFloat
 
     public init(
         isElevated: Bool = false,
         borderColor: Color = MeshTheme.hairlineBorder,
-        cornerRadius: CGFloat = MeshTheme.cardCornerRadius
+        cornerRadius: CGFloat = 20
     ) {
         self.isElevated = isElevated
-        self.borderColor = borderColor
         self.cornerRadius = cornerRadius
     }
 
     public func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         content
-            .background {
-                shape.fill(isElevated ? MeshTheme.elevatedSurface : MeshTheme.cardSurface)
-            }
-            .overlay {
-                shape.strokeBorder(borderColor, lineWidth: 0.8)
-            }
+            .background(
+                isElevated ? MeshTheme.elevatedSurface : MeshTheme.cardSurface,
+                in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            )
     }
 }
 
@@ -132,7 +134,7 @@ extension View {
     public func meshCard(
         elevated: Bool = false,
         borderColor: Color = MeshTheme.hairlineBorder,
-        cornerRadius: CGFloat = MeshTheme.cardCornerRadius
+        cornerRadius: CGFloat = 20
     ) -> some View {
         modifier(MeshCardModifier(isElevated: elevated, borderColor: borderColor, cornerRadius: cornerRadius))
     }
@@ -161,9 +163,6 @@ public struct LinkStatusBadge: View {
         .padding(.horizontal, 9)
         .padding(.vertical, 4.5)
         .background(accent.opacity(0.14), in: Capsule())
-        .overlay {
-            Capsule().strokeBorder(accent.opacity(0.28), lineWidth: 0.8)
-        }
     }
 
     private var symbolName: String {
@@ -209,41 +208,35 @@ public struct HopPathBadge: View {
     }
 
     public var body: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 4) {
             Image(systemName: iconName)
                 .imageScale(.small)
                 .foregroundStyle(accentColor)
 
             if !routeNames.isEmpty {
                 Text(routeNames.joined(separator: " → "))
-                    .font(.caption2.monospaced())
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
 
             Text("\(hopCount)H")
-                .font(.caption2.monospaced().weight(.semibold))
+                .fontWeight(.semibold)
                 .foregroundStyle(accentColor)
 
             if let rttMs {
                 Text("\(rttMs)ms")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(MeshTheme.secondaryText)
             }
 
             if let deliveryState {
                 Text(deliveryLabel(for: deliveryState))
-                    .font(.caption2.weight(.medium))
+                    .fontWeight(.medium)
                     .foregroundStyle(MeshTheme.color(for: deliveryState))
             }
         }
+        .font(.caption2.monospaced())
         .foregroundStyle(MeshTheme.secondaryText)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        .background(MeshTheme.elevatedSurface.opacity(0.85), in: Capsule())
-        .overlay {
-            Capsule().strokeBorder(accentColor.opacity(0.24), lineWidth: 0.8)
-        }
+        .padding(.horizontal, 2)
+        .padding(.vertical, 1)
     }
 
     private var accentColor: Color {
@@ -318,14 +311,10 @@ public struct GeoLocationLinkChip: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(tint)
             }
-            .padding(.horizontal, 11)
-            .padding(.vertical, 7)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
             .frame(minHeight: MeshTheme.minTapDimension)
-            .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(tint.opacity(0.32), lineWidth: 0.8)
-            }
+            .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .contentShape(Rectangle())
         }
         .buttonStyle(.applePressable)
