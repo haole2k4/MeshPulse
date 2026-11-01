@@ -15,6 +15,7 @@
 
 ```text
 MeshPulse/
+├── Assets/                # Thư mục hình ảnh tĩnh & icon app (AppIcon, mesh.png)
 ├── Package.swift          # Swift 6 manifest (MeshCore, MeshPulse, MeshCoreTests)
 ├── xtool.yml              # Cấu hình bundleID & Info.plist cho xtool
 ├── Info.plist             # Quyền Local Network, Bonjour, Bluetooth & Location
