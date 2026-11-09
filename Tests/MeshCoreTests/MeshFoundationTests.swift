@@ -87,7 +87,7 @@ struct MeshFoundationTests {
 
     @Test("RoutingStrategy, LinkKind, DeliveryState, PeerSummary, and TelemetrySnapshot semantics")
     func supportingDomainModels() throws {
-        #expect(PacketType.allCases.count == 8)
+        #expect(PacketType.allCases.count == 12)
         #expect(RoutingStrategy.allCases.count == 3)
         for strategy in RoutingStrategy.allCases {
             #expect(strategy.id == strategy.rawValue)
@@ -243,5 +243,150 @@ struct MeshFoundationTests {
         cache.reset()
         #expect(cache.activeCount == 0)
         #expect(cache.contains(idE, now: t703) == false)
+    }
+
+    // MARK: - Next-Gen Roadmap Module Tests (Modules 1–6)
+
+    @Test("Module 1: Out-of-Band QR verification URI round-trip and TOFU MITM Key Conflict detection")
+    func qrVerificationURIAndTOFUMITMDetection() throws {
+        let sealerA = SimulatedEnvelopeSealer(seed: "node-a")
+        let sealerB = SimulatedEnvelopeSealer(seed: "node-b")
+        let attackerSealer = SimulatedEnvelopeSealer(seed: "attacker-mitm")
+
+        let nodeA = NodeIdentity(nodeID: "iPhone-A", displayName: "iPhone-A", publicKeyBase64: sealerA.publicKeyBase64)
+        let nodeB = NodeIdentity(nodeID: "iPhone-B", displayName: "iPhone-B", publicKeyBase64: sealerB.publicKeyBase64)
+
+        let uri = nodeB.verificationURIString
+        #expect(uri.hasPrefix("meshpulse://verify?"))
+        let parsed = try #require(NodeIdentity.parseVerificationURI(uri))
+        #expect(parsed.nodeID == "iPhone-B")
+        #expect(parsed.fingerprint == nodeB.publicKeyFingerprint)
+        #expect(parsed.publicKeyBase64 == sealerB.publicKeyBase64)
+
+        var routerA = MeshRouter(localIdentity: nodeA)
+        _ = routerA.updateDirectPeers([nodeB])
+        #expect(routerA.knownPeers.first?.trustState == .unverifiedTOFU)
+
+        // Attacker spoofs iPhone-B with a different public key -> router flags .keyConflict and preserves original pinned key!
+        let spoofedB = NodeIdentity(nodeID: "iPhone-B", displayName: "iPhone-B", publicKeyBase64: attackerSealer.publicKeyBase64)
+        let conflictEffects = routerA.updateDirectPeers([spoofedB])
+        let detectedConflict = conflictEffects.contains { effect in
+            if case let .securityKeyConflictDetected(peerID, _, pinned, conflicting) = effect {
+                return peerID == "iPhone-B"
+                    && pinned == sealerB.publicKeyBase64
+                    && conflicting == attackerSealer.publicKeyBase64
+            }
+            return false
+        }
+        #expect(detectedConflict == true)
+        #expect(routerA.knownPeers.first?.trustState == .keyConflict)
+        #expect(routerA.knownPeers.first?.identity.publicKeyBase64 == sealerB.publicKeyBase64)
+
+        // Verify authentic peer via QR -> upgrades to .verifiedOutOfBand and clears conflict
+        let verified = routerA.verifyPeerOutOfBand(
+            nodeID: parsed.nodeID,
+            fingerprint: parsed.fingerprint,
+            publicKeyBase64: parsed.publicKeyBase64
+        )
+        #expect(verified == true)
+        #expect(routerA.knownPeers.first?.trustState == .verifiedOutOfBand)
+        #expect(routerA.knownPeers.first?.conflictPublicKeyBase64 == nil)
+    }
+
+    @Test("Module 2 & 3: Multi-hop 16KB chunked media transfer and voice note with offline transcript + ACK")
+    func multiHopMediaChunkingAndVoiceNoteRouting() throws {
+        var net = SimulatedMeshNetwork(autoReplyEnabled: false)
+        // Force 2-hop relay path iPhone-A -> iPhone-B -> iPhone-C
+        net.setSymmetricBlock("iPhone-A", "iPhone-C", isBlocked: true)
+
+        // Create a 40 KB synthetic compressed image (splits into 3 chunks of 16KB, 16KB, 8KB)
+        let originalImageBytes = Data((0..<40_000).map { UInt8($0 & 0xFF) })
+        let chunks = MeshChunker.split(data: originalImageBytes, caption: "Bản đồ địa hình khu vực B")
+        #expect(chunks.count == 3)
+        #expect(chunks[0].chunkData.count == 16_384)
+        #expect(chunks[1].chunkData.count == 16_384)
+        #expect(chunks[2].chunkData.count == 7_232)
+
+        let (transferID, packetIDs) = try net.sendMediaChunks(
+            from: "iPhone-A",
+            to: "iPhone-C",
+            data: originalImageBytes,
+            caption: "Bản đồ địa hình khu vực B"
+        )
+        #expect(packetIDs.count == 3)
+
+        let nodeA = try #require(net.node("iPhone-A"))
+        let nodeC = try #require(net.node("iPhone-C"))
+
+        let assembledProgress = try #require(nodeC.mediaTransfers[transferID])
+        #expect(assembledProgress.isCompleted == true)
+        #expect(assembledProgress.receivedChunks == 3)
+        #expect(assembledProgress.totalChunks == 3)
+        #expect(assembledProgress.assembledData == originalImageBytes)
+        #expect(assembledProgress.hopCount == 2)
+
+        // End-to-End ACK from iPhone-C back to iPhone-A marks transferID as deliveredAck
+        #expect(nodeA.deliveryStates[transferID] == .deliveredAck)
+
+        // Voice note with offline transcript across 2-hop mesh
+        let voicePayload = VoiceNotePayload(
+            audioData: Data(repeating: 0x42, count: 9_600),
+            durationSeconds: 4.8,
+            transcriptText: "Đội tiền trạm đã tới điểm tập kết an toàn.",
+            waveformSamples: [0.2, 0.5, 0.9, 0.4, 0.7]
+        )
+        let voiceID = try net.sendVoiceNote(
+            from: "iPhone-A",
+            to: "iPhone-C",
+            voiceNote: voicePayload
+        )
+        let updatedNodeC = try #require(net.node("iPhone-C"))
+        let receivedVoice = try #require(updatedNodeC.receivedMessages.first { $0.id == voiceID })
+        #expect(receivedVoice.packetType == .voiceNote)
+        #expect(receivedVoice.voiceNote == voicePayload)
+        #expect(receivedVoice.hopCount == 2)
+    }
+
+    @Test("Module 4 & 5: Offline GPS ProximityMath and CRDT SafetyRollCall + MeshPoll convergence")
+    func proximityMathAndCRDTConvergence() throws {
+        let origin = SimulatedMeshNetwork.defaultSimulatedCoordinate(for: "iPhone-A")
+        let targetB = SimulatedMeshNetwork.defaultSimulatedCoordinate(for: "iPhone-B")
+
+        let distMeters = ProximityMath.haversineDistanceMeters(from: origin, to: targetB)
+        #expect(distMeters > 35 && distMeters < 50)
+        let bearing = ProximityMath.bearingDegrees(from: origin, to: targetB)
+        #expect(bearing > 30 && bearing < 60)
+        #expect(ProximityMath.cardinalDirectionVN(forBearing: bearing) == "Đông Bắc")
+        #expect(ProximityMath.relativeArrowAngleDegrees(bearing: 45, deviceHeading: 45) == 0)
+
+        // CRDT SafetyRollCall & MeshPoll multi-node convergence in SimulatedMeshNetwork
+        var net = SimulatedMeshNetwork(autoReplyEnabled: true)
+        net.setSymmetricBlock("iPhone-A", "iPhone-C", isBlocked: true)
+
+        var rollCall = SafetyRollCallState(
+            title: "Điểm danh sau mưa lớn",
+            createdByNodeID: "iPhone-A",
+            createdByName: "iPhone-A"
+        )
+        rollCall.recordVote(nodeID: "iPhone-A", displayName: "iPhone-A", status: .safe)
+        _ = try net.broadcastRollCall(from: "iPhone-A", rollCall: rollCall)
+
+        let convergedRC = try #require(net.node("iPhone-A")?.router.activeRollCall)
+        #expect(convergedRC.responses.count == 3)
+        #expect(convergedRC.safeCount == 3)
+
+        var poll = MeshPollState(
+            question: "Dừng nghỉ ở trạm tiếp theo?",
+            options: ["Dừng nghỉ 15 phút", "Đi tiếp tới trạm chính"],
+            createdByNodeID: "iPhone-A",
+            createdByName: "iPhone-A"
+        )
+        poll.castVote(nodeID: "iPhone-A", displayName: "iPhone-A", optionIndex: 0)
+        _ = try net.broadcastPoll(from: "iPhone-A", poll: poll)
+
+        let convergedPoll = try #require(net.node("iPhone-A")?.router.activePoll)
+        #expect(convergedPoll.totalVotes == 3)
+        #expect(convergedPoll.voteCount(forOption: 0) == 2)
+        #expect(convergedPoll.voteCount(forOption: 1) == 1)
     }
 }

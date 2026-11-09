@@ -258,11 +258,79 @@ public struct HopPathBadge: View {
         case .queuedDTN:
             "Lưu DTN"
         case .sentDirect:
-            "Đã gửi"
+            "✓ Đã gửi"
         case .relayed:
-            "Bắc cầu"
+            "✓ Bắc cầu"
         case .deliveredAck:
-            "ACK"
+            "✓✓ Đã nhận (ACK)"
+        }
+    }
+}
+
+/// Displays peer security verification status (`🔒 E2EE Tự động`, `🛡️ Đã xác thực tận tay`, or `⚠️ Khóa thay đổi`).
+public struct PeerTrustBadge: View {
+    public let trustState: PeerTrustState
+    public let compact: Bool
+
+    public init(trustState: PeerTrustState, compact: Bool = false) {
+        self.trustState = trustState
+        self.compact = compact
+    }
+
+    public var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: symbolName)
+                .font(.system(size: compact ? 10 : 11, weight: .bold))
+            Text(labelText)
+                .font(.system(size: compact ? 10 : 11, weight: .semibold))
+                .lineLimit(1)
+        }
+        .foregroundStyle(accentColor)
+        .padding(.horizontal, compact ? 7 : 9)
+        .padding(.vertical, compact ? 3 : 4.5)
+        .background(accentColor.opacity(0.14), in: Capsule())
+    }
+
+    private var symbolName: String {
+        switch trustState {
+        case .unverifiedTOFU:
+            "lock.fill"
+        case .verifiedOutOfBand:
+            "checkmark.shield.fill"
+        case .keyConflict:
+            "exclamationmark.triangle.fill"
+        }
+    }
+
+    private var labelText: String {
+        if compact {
+            switch trustState {
+            case .unverifiedTOFU:
+                return "E2EE Tự động"
+            case .verifiedOutOfBand:
+                return "Đã xác thực"
+            case .keyConflict:
+                return "Khóa bất thường"
+            }
+        }
+        switch trustState {
+        case .unverifiedTOFU:
+            return "🔒 E2EE Tự động (Unverified)"
+        case .verifiedOutOfBand:
+            return "🛡️ Đã xác thực tận tay (Verified)"
+        case .keyConflict:
+            return "⚠️ Cảnh báo Khóa Thay đổi"
+        }
+    }
+
+    private var accentColor: Color {
+        switch trustState {
+        case .unverifiedTOFU:
+            MeshTheme.secondaryText
+        case .verifiedOutOfBand:
+            MeshTheme.emerald
+        case .keyConflict:
+            MeshTheme.meshAmber
         }
     }
 }

@@ -14,11 +14,30 @@ public final class LocationProvider: NSObject, OfflineLocationProviding, CLLocat
     private let manager = CLLocationManager()
     private var authWaiters: [UUID: CheckedContinuation<CLAuthorizationStatus, Never>] = [:]
     private var locationWaiters: [UUID: CheckedContinuation<GeoCoordinate?, Never>] = [:]
+    public private(set) var latestHeadingDegrees: Double = 0.0
+    public var onHeadingUpdate: ((Double) -> Void)?
 
     public override init() {
         super.init()
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
+        manager.headingFilter = 2.0
+    }
+
+    public func startHeadingUpdates() {
+        #if os(iOS)
+        if CLLocationManager.headingAvailable() {
+            manager.startUpdatingHeading()
+        }
+        #endif
+    }
+
+    public func stopHeadingUpdates() {
+        #if os(iOS)
+        if CLLocationManager.headingAvailable() {
+            manager.stopUpdatingHeading()
+        }
+        #endif
     }
 
     public func currentCoordinate() async -> GeoCoordinate? {
@@ -91,21 +110,25 @@ public final class LocationProvider: NSObject, OfflineLocationProviding, CLLocat
         else {
             return nil
         }
-        return GeoCoordinate(
-            latitude: location.coordinate.latitude,
-            longitude: location.coordinate.longitude,
-            accuracyMeters: location.horizontalAccuracy
-        )
+        return Self.makeGeoCoordinate(from: location)
     }
 
     private func bestAvailableCachedCoordinate() -> GeoCoordinate? {
         guard let location = manager.location, location.horizontalAccuracy >= 0 else {
             return nil
         }
+        return Self.makeGeoCoordinate(from: location)
+    }
+
+    nonisolated private static func makeGeoCoordinate(from loc: CLLocation) -> GeoCoordinate {
+        let alt: Double? = loc.verticalAccuracy >= 0 ? loc.altitude : nil
+        let spd: Double? = loc.speed >= 0 ? loc.speed : nil
         return GeoCoordinate(
-            latitude: location.coordinate.latitude,
-            longitude: location.coordinate.longitude,
-            accuracyMeters: location.horizontalAccuracy
+            latitude: loc.coordinate.latitude,
+            longitude: loc.coordinate.longitude,
+            accuracyMeters: loc.horizontalAccuracy,
+            altitudeMeters: alt,
+            speedMetersPerSecond: spd
         )
     }
 
@@ -151,18 +174,27 @@ public final class LocationProvider: NSObject, OfflineLocationProviding, CLLocat
     ) {
         let validCoord = locations
             .last(where: { $0.horizontalAccuracy >= 0 })
-            .map { loc in
-                GeoCoordinate(
-                    latitude: loc.coordinate.latitude,
-                    longitude: loc.coordinate.longitude,
-                    accuracyMeters: loc.horizontalAccuracy
-                )
-            }
+            .map { Self.makeGeoCoordinate(from: $0) }
 
         Task { @MainActor [weak self] in
             self?.resolveLocationWaiters(with: validCoord)
         }
     }
+
+    #if os(iOS)
+    nonisolated public func locationManager(
+        _ manager: CLLocationManager,
+        didUpdateHeading newHeading: CLHeading
+    ) {
+        let heading = newHeading.trueHeading >= 0 ? newHeading.trueHeading : newHeading.magneticHeading
+        guard heading >= 0 else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.latestHeadingDegrees = heading
+            self.onHeadingUpdate?(heading)
+        }
+    }
+    #endif
 
     nonisolated public func locationManager(
         _ manager: CLLocationManager,

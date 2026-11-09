@@ -87,6 +87,16 @@ public struct ChatThreadItem: Identifiable, Sendable, Equatable, Codable {
     public let isSOS: Bool
     public let timestamp: Date
 
+    // Advanced Phase 2 Multimedia Additions
+    public var voiceNote: VoiceNotePayload?
+    public var mediaData: Data?
+    public var mediaTransferID: UUID?
+    public var mediaMimeType: String?
+    public var mediaTotalBytes: Int?
+    public var mediaReceivedChunks: Int?
+    public var mediaTotalChunks: Int?
+    public var isMediaComplete: Bool
+
     public init(
         id: UUID,
         peerThreadID: String,
@@ -103,7 +113,15 @@ public struct ChatThreadItem: Identifiable, Sendable, Equatable, Codable {
         isEncrypted: Bool,
         isOutgoing: Bool,
         isSOS: Bool,
-        timestamp: Date
+        timestamp: Date,
+        voiceNote: VoiceNotePayload? = nil,
+        mediaData: Data? = nil,
+        mediaTransferID: UUID? = nil,
+        mediaMimeType: String? = nil,
+        mediaTotalBytes: Int? = nil,
+        mediaReceivedChunks: Int? = nil,
+        mediaTotalChunks: Int? = nil,
+        isMediaComplete: Bool = true
     ) {
         self.id = id
         self.peerThreadID = peerThreadID
@@ -121,6 +139,14 @@ public struct ChatThreadItem: Identifiable, Sendable, Equatable, Codable {
         self.isOutgoing = isOutgoing
         self.isSOS = isSOS
         self.timestamp = timestamp
+        self.voiceNote = voiceNote
+        self.mediaData = mediaData
+        self.mediaTransferID = mediaTransferID
+        self.mediaMimeType = mediaMimeType
+        self.mediaTotalBytes = mediaTotalBytes
+        self.mediaReceivedChunks = mediaReceivedChunks
+        self.mediaTotalChunks = mediaTotalChunks
+        self.isMediaComplete = isMediaComplete
     }
 }
 
@@ -188,6 +214,38 @@ public final class MeshCoordinator {
 
     public private(set) var directThreads: [String: [ChatThreadItem]] = [:]
     public private(set) var activePulses: [ActivePacketPulse] = []
+
+    // MARK: Advanced Phase 2 Modules State
+    public private(set) var deviceHeading: Double = 0.0
+    private var liveMediaTransfers: [UUID: MediaTransferProgress] = [:]
+    private var chunkAssembler = ChunkAssembler()
+
+    public var activeRollCall: SafetyRollCallState? {
+        isMockMode
+            ? mockNetwork.node(SimulatedMeshNetwork.nodeAID)?.router.activeRollCall
+            : liveRouter.activeRollCall
+    }
+
+    public var activePoll: MeshPollState? {
+        isMockMode
+            ? mockNetwork.node(SimulatedMeshNetwork.nodeAID)?.router.activePoll
+            : liveRouter.activePoll
+    }
+
+    public var mediaTransfers: [UUID: MediaTransferProgress] {
+        if isMockMode {
+            return mockNetwork.node(SimulatedMeshNetwork.nodeAID)?.mediaTransfers ?? liveMediaTransfers
+        }
+        return liveMediaTransfers
+    }
+
+    public var latestLocalCoordinate: GeoCoordinate? {
+        if isMockMode {
+            return mockNetwork.node(SimulatedMeshNetwork.nodeAID)?.router.latestLocalCoordinate
+                ?? GeoCoordinate(latitude: 10.772612, longitude: 106.657891, accuracyMeters: 6.5)
+        }
+        return liveRouter.latestLocalCoordinate
+    }
 
     // MARK: Engines & Platform Adapters
 
@@ -284,6 +342,14 @@ public final class MeshCoordinator {
         if !startInMockMode {
             activateLiveTransportIfAvailable()
         }
+
+        if let loc = locationProvider as? LocationProvider {
+            loc.onHeadingUpdate = { [weak self] heading in
+                Task { @MainActor [weak self] in
+                    self?.deviceHeading = heading
+                }
+            }
+        }
     }
 
     // MARK: - Live Service Injection Hook (Phase 3 & Phase 4)
@@ -307,9 +373,39 @@ public final class MeshCoordinator {
         }
         if let locationProvider {
             self.locationProvider = locationProvider
+            if let loc = locationProvider as? LocationProvider {
+                loc.onHeadingUpdate = { [weak self] heading in
+                    Task { @MainActor [weak self] in
+                        self?.deviceHeading = heading
+                    }
+                }
+            }
         }
         if !isMockMode, isRadioEnabled {
             activateLiveTransportIfAvailable()
+        }
+    }
+
+    // MARK: - Compass & Heading Controls
+
+    public func updateSimulatedHeading(degrees: Double) {
+        self.deviceHeading = degrees
+    }
+
+    public func startHeadingUpdates() {
+        if let loc = locationProvider as? LocationProvider {
+            loc.startHeadingUpdates()
+            loc.onHeadingUpdate = { [weak self] heading in
+                Task { @MainActor [weak self] in
+                    self?.deviceHeading = heading
+                }
+            }
+        }
+    }
+
+    public func stopHeadingUpdates() {
+        if let loc = locationProvider as? LocationProvider {
+            loc.stopHeadingUpdates()
         }
     }
 
@@ -349,7 +445,10 @@ public final class MeshCoordinator {
                     identity: summary.identity,
                     linkKind: .offlineDTN,
                     lastRTTMilliseconds: summary.lastRTTMilliseconds,
-                    lastSeen: summary.lastSeen
+                    lastSeen: summary.lastSeen,
+                    trustState: summary.trustState,
+                    conflictPublicKeyBase64: summary.conflictPublicKeyBase64,
+                    lastCoordinate: summary.lastCoordinate
                 )
             }
         }
@@ -373,7 +472,13 @@ public final class MeshCoordinator {
         if isMockMode {
             for mockID in [SimulatedMeshNetwork.nodeBID, SimulatedMeshNetwork.nodeCID] where byID[mockID] == nil {
                 if let identity = mockNetwork.node(mockID)?.identity {
-                    byID[mockID] = PeerSummary(identity: identity, linkKind: .offlineDTN, lastSeen: .distantPast)
+                    byID[mockID] = PeerSummary(
+                        identity: identity,
+                        linkKind: .offlineDTN,
+                        lastSeen: .distantPast,
+                        trustState: mockNetwork.node(SimulatedMeshNetwork.nodeAID)?.router.peerTrustStates[mockID] ?? .unverifiedTOFU,
+                        lastCoordinate: mockNetwork.node(mockID)?.router.latestLocalCoordinate
+                    )
                 }
             }
         }
@@ -409,10 +514,14 @@ public final class MeshCoordinator {
             let resolvedName =
                 items.last(where: { !$0.isOutgoing })?.senderName
                 ?? peerID
+            let trust: PeerTrustState = isMockMode
+                ? (mockNetwork.node(SimulatedMeshNetwork.nodeAID)?.router.peerTrustStates[peerID] ?? .unverifiedTOFU)
+                : (liveRouter.peerTrustStates[peerID] ?? .unverifiedTOFU)
             byID[peerID] = PeerSummary(
                 identity: NodeIdentity(nodeID: peerID, displayName: resolvedName),
                 linkKind: .offlineDTN,
-                lastSeen: items.last?.timestamp ?? .distantPast
+                lastSeen: items.last?.timestamp ?? .distantPast,
+                trustState: trust
             )
         }
         return byID.values.sorted { lhs, rhs in
@@ -433,7 +542,14 @@ public final class MeshCoordinator {
             return match
         }
         if isMockMode, let mockIdentity = mockNetwork.node(peerID)?.identity {
-            return PeerSummary(identity: mockIdentity, linkKind: .offlineDTN, lastSeen: .distantPast)
+            return PeerSummary(
+                identity: mockIdentity,
+                linkKind: .offlineDTN,
+                lastSeen: .distantPast,
+                trustState: mockNetwork.node(SimulatedMeshNetwork.nodeAID)?.router.peerTrustStates[peerID] ?? .unverifiedTOFU,
+                conflictPublicKeyBase64: mockNetwork.node(SimulatedMeshNetwork.nodeAID)?.router.conflictingKeys[peerID],
+                lastCoordinate: mockNetwork.node(peerID)?.router.latestLocalCoordinate
+            )
         }
         let fallbackName =
             directThreads[peerID]?.last(where: { !$0.isOutgoing })?.senderName
@@ -441,7 +557,10 @@ public final class MeshCoordinator {
         return PeerSummary(
             identity: NodeIdentity(nodeID: peerID, displayName: fallbackName),
             linkKind: .offlineDTN,
-            lastSeen: directThreads[peerID]?.last?.timestamp ?? .distantPast
+            lastSeen: directThreads[peerID]?.last?.timestamp ?? .distantPast,
+            trustState: liveRouter.peerTrustStates[peerID] ?? .unverifiedTOFU,
+            conflictPublicKeyBase64: liveRouter.conflictingKeys[peerID],
+            lastCoordinate: liveRouter.knownPeers.first(where: { $0.id == peerID })?.lastCoordinate
         )
     }
 
@@ -729,6 +848,345 @@ public final class MeshCoordinator {
                 processLiveEffects(effects)
             }
         }
+    }
+
+    // MARK: - Advanced Phase 2 Operations
+
+    public func sendVoiceNote(
+        voiceNote: VoiceNotePayload,
+        to targetID: String = MeshPacket.broadcastTarget
+    ) {
+        let now = Date()
+        let isBroadcast = targetID == MeshPacket.broadcastTarget
+        let threadKey = isBroadcast ? MeshPacket.broadcastTarget : targetID
+        let summaryText = "🎙️ Tin nhắn thoại (\(String(format: "%.1fs", voiceNote.durationSeconds)))"
+
+        if isMockMode {
+            mockNetwork.advanceTime(by: max(0.005, now.timeIntervalSince(mockNetwork.currentTime)))
+            guard let packetID = try? mockNetwork.sendVoiceNote(
+                from: SimulatedMeshNetwork.nodeAID,
+                to: targetID,
+                voiceNote: voiceNote,
+                settle: false
+            ) else { return }
+
+            let item = ChatThreadItem(
+                id: packetID,
+                peerThreadID: threadKey,
+                senderID: SimulatedMeshNetwork.nodeAID,
+                senderName: localDisplayName,
+                targetID: targetID,
+                text: summaryText,
+                coordinate: nil,
+                deliveryState: isBroadcast ? (isRadioEnabled ? .sentDirect : .queuedDTN) : (mockNetwork.node(SimulatedMeshNetwork.nodeAID)?.deliveryStates[packetID] ?? .queuedDTN),
+                routeNames: [localDisplayName],
+                hopCount: 1,
+                remainingTTL: 4,
+                rttMs: nil,
+                isEncrypted: !isBroadcast,
+                isOutgoing: true,
+                isSOS: false,
+                timestamp: now,
+                voiceNote: voiceNote
+            )
+
+            if isBroadcast {
+                mockBroadcastMessages.append(item)
+            } else {
+                directThreads[threadKey, default: []].append(item)
+            }
+            runMockStepsAndCapturePulses()
+        } else {
+            let activeSealer: any EnvelopeSealer = liveSealer ?? liveFallbackSealer
+            let recipientKey = liveRouter.knownPeers.first { $0.id == targetID }?.identity.publicKeyBase64
+
+            guard let (packetID, effects) = try? liveRouter.sendVoiceNote(
+                voiceNote: voiceNote,
+                to: targetID,
+                sealer: !isBroadcast ? activeSealer : nil,
+                recipientPublicKeyBase64: recipientKey,
+                now: now
+            ) else { return }
+
+            let item = ChatThreadItem(
+                id: packetID,
+                peerThreadID: threadKey,
+                senderID: liveRouter.localIdentity.nodeID,
+                senderName: liveRouter.localIdentity.displayName,
+                targetID: targetID,
+                text: summaryText,
+                coordinate: nil,
+                deliveryState: .queuedDTN,
+                routeNames: [liveRouter.localIdentity.displayName],
+                hopCount: 1,
+                remainingTTL: 4,
+                rttMs: nil,
+                isEncrypted: !isBroadcast && recipientKey != nil,
+                isOutgoing: true,
+                isSOS: false,
+                timestamp: now,
+                voiceNote: voiceNote
+            )
+
+            if isBroadcast {
+                liveBroadcastMessages.append(item)
+            } else {
+                directThreads[threadKey, default: []].append(item)
+            }
+            processLiveEffects(effects)
+        }
+    }
+
+    public func sendMedia(
+        data: Data,
+        caption: String = "",
+        to targetID: String = MeshPacket.broadcastTarget
+    ) {
+        let compressed = MediaTransferActivityManager.prepareImageForMesh(data: data) ?? data
+        let now = Date()
+        let isBroadcast = targetID == MeshPacket.broadcastTarget
+        let threadKey = isBroadcast ? MeshPacket.broadcastTarget : targetID
+        let transferID = UUID()
+        let totalChunks = MeshChunker.chunkCount(for: compressed.count)
+
+        MediaTransferActivityManager.shared.trackTransferStarted(
+            transferID: transferID,
+            totalChunks: totalChunks,
+            totalBytes: compressed.count,
+            isOutgoing: true,
+            filename: caption.isEmpty ? "Ảnh nén Mesh" : caption
+        )
+
+        let initialProgress = MediaTransferProgress(
+            transferID: transferID,
+            totalChunks: totalChunks,
+            receivedChunks: 0,
+            totalBytes: compressed.count,
+            isComplete: false
+        )
+        liveMediaTransfers[transferID] = initialProgress
+
+        let placeholderItem = ChatThreadItem(
+            id: transferID,
+            peerThreadID: threadKey,
+            senderID: isMockMode ? SimulatedMeshNetwork.nodeAID : liveRouter.localIdentity.nodeID,
+            senderName: localDisplayName,
+            targetID: targetID,
+            text: caption.isEmpty ? "📷 Hình ảnh Mesh" : caption,
+            coordinate: nil,
+            deliveryState: isBroadcast ? (isRadioEnabled ? .sentDirect : .queuedDTN) : .queuedDTN,
+            routeNames: [localDisplayName],
+            hopCount: 1,
+            remainingTTL: 4,
+            rttMs: nil,
+            isEncrypted: !isBroadcast,
+            isOutgoing: true,
+            isSOS: false,
+            timestamp: now,
+            mediaData: compressed,
+            mediaTransferID: transferID,
+            mediaMimeType: "image/jpeg",
+            mediaTotalBytes: compressed.count,
+            mediaReceivedChunks: totalChunks,
+            mediaTotalChunks: totalChunks,
+            isMediaComplete: true
+        )
+
+        if isBroadcast {
+            if isMockMode {
+                mockBroadcastMessages.append(placeholderItem)
+            } else {
+                liveBroadcastMessages.append(placeholderItem)
+            }
+        } else {
+            directThreads[threadKey, default: []].append(placeholderItem)
+        }
+
+        if isMockMode {
+            mockNetwork.advanceTime(by: max(0.005, now.timeIntervalSince(mockNetwork.currentTime)))
+            _ = try? mockNetwork.sendMediaChunks(
+                from: SimulatedMeshNetwork.nodeAID,
+                to: targetID,
+                data: compressed,
+                transferID: transferID,
+                caption: caption,
+                settle: false
+            )
+            runMockStepsAndCapturePulses()
+        } else {
+            let activeSealer: any EnvelopeSealer = liveSealer ?? liveFallbackSealer
+            let recipientKey = liveRouter.knownPeers.first { $0.id == targetID }?.identity.publicKeyBase64
+
+            guard let (_, _, effects) = try? liveRouter.sendMediaChunks(
+                data: compressed,
+                transferID: transferID,
+                caption: caption,
+                to: targetID,
+                sealer: !isBroadcast ? activeSealer : nil,
+                recipientPublicKeyBase64: recipientKey,
+                now: now
+            ) else { return }
+
+            processLiveEffects(effects)
+        }
+    }
+
+    public func broadcastRollCall(title: String) {
+        let myID = isMockMode ? SimulatedMeshNetwork.nodeAID : liveRouter.localIdentity.nodeID
+        let rc = SafetyRollCallState(
+            id: UUID(),
+            title: title,
+            createdByNodeID: myID,
+            createdByName: localDisplayName,
+            createdAt: Date(),
+            responses: [
+                myID: RollCallVote(
+                    nodeID: myID,
+                    status: .safe,
+                    voterName: localDisplayName,
+                    coordinate: latestLocalCoordinate,
+                    updatedAt: Date()
+                )
+            ]
+        )
+
+        if isMockMode {
+            mockNetwork.advanceTime(by: 0.01)
+            _ = try? mockNetwork.broadcastRollCall(
+                from: SimulatedMeshNetwork.nodeAID,
+                rollCall: rc,
+                settle: false
+            )
+            runMockStepsAndCapturePulses()
+        } else {
+            let (_, effects) = (try? liveRouter.broadcastRollCall(rc, now: Date())) ?? (UUID(), [])
+            processLiveEffects(effects)
+        }
+    }
+
+    public func voteRollCall(status: SafetyStatus) {
+        guard var current = activeRollCall else { return }
+        let myID = isMockMode ? SimulatedMeshNetwork.nodeAID : liveRouter.localIdentity.nodeID
+        current.recordResponse(
+            nodeID: myID,
+            status: status,
+            voterName: localDisplayName,
+            coordinate: latestLocalCoordinate,
+            updatedAt: Date()
+        )
+
+        if isMockMode {
+            mockNetwork.advanceTime(by: 0.01)
+            _ = try? mockNetwork.broadcastRollCall(
+                from: SimulatedMeshNetwork.nodeAID,
+                rollCall: current,
+                settle: false
+            )
+            runMockStepsAndCapturePulses()
+        } else {
+            let (_, effects) = (try? liveRouter.broadcastRollCall(current, now: Date())) ?? (UUID(), [])
+            processLiveEffects(effects)
+        }
+    }
+
+    public func dismissRollCall() {
+        if !isMockMode {
+            liveRouter.activeRollCall = nil
+        }
+    }
+
+    public func broadcastPoll(question: String, options: [String]) {
+        let myID = isMockMode ? SimulatedMeshNetwork.nodeAID : liveRouter.localIdentity.nodeID
+        let poll = MeshPollState(
+            id: UUID(),
+            question: question,
+            options: options,
+            createdByNodeID: myID,
+            createdByName: localDisplayName,
+            createdAt: Date(),
+            votes: [:]
+        )
+
+        if isMockMode {
+            mockNetwork.advanceTime(by: 0.01)
+            _ = try? mockNetwork.broadcastPoll(
+                from: SimulatedMeshNetwork.nodeAID,
+                poll: poll,
+                settle: false
+            )
+            runMockStepsAndCapturePulses()
+        } else {
+            let (_, effects) = (try? liveRouter.broadcastPoll(poll, now: Date())) ?? (UUID(), [])
+            processLiveEffects(effects)
+        }
+    }
+
+    public func votePoll(optionIndex: Int) {
+        guard var current = activePoll else { return }
+        let myID = isMockMode ? SimulatedMeshNetwork.nodeAID : liveRouter.localIdentity.nodeID
+        current.recordVote(
+            nodeID: myID,
+            optionIndex: optionIndex,
+            voterName: localDisplayName,
+            updatedAt: Date()
+        )
+
+        if isMockMode {
+            mockNetwork.advanceTime(by: 0.01)
+            _ = try? mockNetwork.broadcastPoll(
+                from: SimulatedMeshNetwork.nodeAID,
+                poll: current,
+                settle: false
+            )
+            runMockStepsAndCapturePulses()
+        } else {
+            let (_, effects) = (try? liveRouter.broadcastPoll(current, now: Date())) ?? (UUID(), [])
+            processLiveEffects(effects)
+        }
+    }
+
+    public func dismissPoll() {
+        if !isMockMode {
+            liveRouter.activePoll = nil
+        }
+    }
+
+    public func verifyPeerOutOfBand(peerID: String, fingerprint: String) {
+        if isMockMode {
+            _ = mockNetwork.verifyPeerOutOfBand(
+                peerID: peerID,
+                onNodeID: SimulatedMeshNetwork.nodeAID,
+                fingerprint: fingerprint
+            )
+            syncFromMockNodeState()
+        } else {
+            let (_, effects) = liveRouter.verifyPeerOutOfBand(peerID: peerID, fingerprint: fingerprint)
+            processLiveEffects(effects)
+        }
+    }
+
+    public func trustConflictingKey(peerID: String) {
+        if isMockMode {
+            mockNetwork.trustConflictingKey(
+                peerID: peerID,
+                onNodeID: SimulatedMeshNetwork.nodeAID
+            )
+            syncFromMockNodeState()
+        } else {
+            let effects = liveRouter.trustConflictingKey(peerID: peerID)
+            processLiveEffects(effects)
+        }
+    }
+
+    public func mockSimulateKeyConflict(peerID: String) {
+        guard isMockMode else { return }
+        let spoofedKey = "SPOOFED_KEY_\(UUID().uuidString.prefix(8))"
+        mockNetwork.simulateKeyConflict(
+            onNodeID: SimulatedMeshNetwork.nodeAID,
+            peerID: peerID,
+            spoofedPublicKey: spoofedKey
+        )
+        syncFromMockNodeState()
     }
 
     // MARK: - Internal Dispatch & State Synchronization
@@ -1068,7 +1526,15 @@ public final class MeshCoordinator {
                 isEncrypted: msg.isEncrypted,
                 isOutgoing: false,
                 isSOS: msg.packetType == .sos,
-                timestamp: msg.timestamp
+                timestamp: msg.timestamp,
+                voiceNote: msg.voiceNote,
+                mediaData: msg.imageJPEGData,
+                mediaTransferID: (msg.packetType == .mediaChunk ? msg.id : nil),
+                mediaMimeType: (msg.imageJPEGData != nil ? "image/jpeg" : nil),
+                mediaTotalBytes: msg.imageJPEGData?.count,
+                mediaReceivedChunks: msg.imageJPEGData != nil ? 1 : nil,
+                mediaTotalChunks: msg.imageJPEGData != nil ? 1 : nil,
+                isMediaComplete: msg.imageJPEGData != nil
             )
             if isBroadcast {
                 mockBroadcastMessages.append(item)
@@ -1236,7 +1702,15 @@ public final class MeshCoordinator {
                     isEncrypted: msg.isEncrypted,
                     isOutgoing: false,
                     isSOS: msg.packetType == .sos,
-                    timestamp: msg.timestamp
+                    timestamp: msg.timestamp,
+                    voiceNote: msg.voiceNote,
+                    mediaData: msg.imageJPEGData,
+                    mediaTransferID: (msg.packetType == .mediaChunk ? msg.id : nil),
+                    mediaMimeType: (msg.imageJPEGData != nil ? "image/jpeg" : nil),
+                    mediaTotalBytes: msg.imageJPEGData?.count,
+                    mediaReceivedChunks: msg.imageJPEGData != nil ? 1 : nil,
+                    mediaTotalChunks: msg.imageJPEGData != nil ? 1 : nil,
+                    isMediaComplete: msg.imageJPEGData != nil
                 )
                 if isBroadcast {
                     liveBroadcastMessages.append(item)
@@ -1272,6 +1746,24 @@ public final class MeshCoordinator {
                 if livePacketLogs.count > Self.maxPacketLogEntries * 2 {
                     livePacketLogs = Array(livePacketLogs.suffix(Self.maxPacketLogEntries))
                 }
+
+            case let .mediaTransferUpdated(progress):
+                liveMediaTransfers[progress.transferID] = progress
+                MediaTransferActivityManager.shared.updateProgress(
+                    transferID: progress.transferID,
+                    receivedChunks: progress.receivedChunks,
+                    totalChunks: progress.totalChunks,
+                    isOutgoing: false
+                )
+
+            case .rollCallUpdated:
+                break
+
+            case .pollUpdated:
+                break
+
+            case .securityKeyConflictDetected:
+                break
             }
         }
 

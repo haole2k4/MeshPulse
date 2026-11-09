@@ -31,6 +31,62 @@ public struct NodeIdentity: Codable, Sendable, Hashable, Identifiable {
         }
         return CoreSHA256.fingerprint64HexGrouped(keyData)
     }
+
+    /// Out-of-band QR verification URI (`meshpulse://verify?node=<id>&fp=<fingerprint>&key=<base64>`).
+    public var verificationURIString: String {
+        var components = URLComponents()
+        components.scheme = "meshpulse"
+        components.host = "verify"
+        var items: [URLQueryItem] = [
+            URLQueryItem(name: "node", value: nodeID),
+            URLQueryItem(name: "fp", value: publicKeyFingerprint ?? ""),
+        ]
+        if let publicKeyBase64, !publicKeyBase64.isEmpty {
+            items.append(URLQueryItem(name: "key", value: publicKeyBase64))
+        }
+        components.queryItems = items
+        return components.string ?? "meshpulse://verify?node=\(nodeID)&fp=\(publicKeyFingerprint ?? "")"
+    }
+
+    /// Parses a `meshpulse://verify?node=<id>&fp=<fingerprint>[&key=<base64>]` QR string.
+    public static func parseVerificationURI(
+        _ rawString: String
+    ) -> (nodeID: String, fingerprint: String, publicKeyBase64: String?)? {
+        let trimmed = rawString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let components = URLComponents(string: trimmed),
+              components.scheme?.lowercased() == "meshpulse",
+              components.host?.lowercased() == "verify",
+              let items = components.queryItems
+        else {
+            return nil
+        }
+        guard let nodeID = items.first(where: { $0.name == "node" })?.value,
+              !nodeID.isEmpty,
+              let fp = items.first(where: { $0.name == "fp" })?.value,
+              !fp.isEmpty
+        else {
+            return nil
+        }
+        let key = items.first(where: { $0.name == "key" })?.value
+        if let key, !key.isEmpty {
+            let candidate = NodeIdentity(nodeID: nodeID, displayName: nodeID, publicKeyBase64: key)
+            if let computedFP = candidate.publicKeyFingerprint,
+               computedFP.uppercased() != fp.uppercased()
+            {
+                return nil
+            }
+        }
+        return (nodeID, fp.uppercased(), (key?.isEmpty == false) ? key : nil)
+    }
+}
+
+public enum PeerTrustState: String, Codable, Sendable, Equatable {
+    /// 🔒 E2EE Tự động (Ghim khóa lần đầu qua sóng vô tuyến TOFU)
+    case unverifiedTOFU
+    /// 🛡️ Đã xác thực tận tay (Đã đối chiếu vân tay hoặc quét mã QR ngoài băng tần)
+    case verifiedOutOfBand
+    /// ⚠️ Cảnh báo bảo mật: Cùng PeerID nhưng khóa công khai bị thay đổi (Nghi vấn MITM)
+    case keyConflict
 }
 
 public enum PacketType: String, Codable, Sendable, CaseIterable {
@@ -42,6 +98,10 @@ public enum PacketType: String, Codable, Sendable, CaseIterable {
     case summaryVector
     case packetRequest
     case sos
+    case mediaChunk
+    case voiceNote
+    case rollCall
+    case poll
 }
 
 public enum RoutingStrategy: String, Codable, Sendable, CaseIterable, Identifiable {
@@ -80,11 +140,21 @@ public struct GeoCoordinate: Codable, Sendable, Equatable {
     public let latitude: Double
     public let longitude: Double
     public let accuracyMeters: Double
+    public let altitudeMeters: Double?
+    public let speedMetersPerSecond: Double?
 
-    public init(latitude: Double, longitude: Double, accuracyMeters: Double) {
+    public init(
+        latitude: Double,
+        longitude: Double,
+        accuracyMeters: Double,
+        altitudeMeters: Double? = nil,
+        speedMetersPerSecond: Double? = nil
+    ) {
         self.latitude = latitude
         self.longitude = longitude
         self.accuracyMeters = accuracyMeters
+        self.altitudeMeters = altitudeMeters
+        self.speedMetersPerSecond = speedMetersPerSecond
     }
 }
 
@@ -98,13 +168,41 @@ public struct ChatMessagePayload: Codable, Sendable, Equatable {
     }
 }
 
+public struct VoiceNotePayload: Codable, Sendable, Equatable {
+    public let audioData: Data
+    public let durationSeconds: Double
+    public let transcriptText: String
+    public let waveformSamples: [Float]
+    public let coordinate: GeoCoordinate?
+
+    public init(
+        audioData: Data,
+        durationSeconds: Double,
+        transcriptText: String,
+        waveformSamples: [Float] = [],
+        coordinate: GeoCoordinate? = nil
+    ) {
+        self.audioData = audioData
+        self.durationSeconds = durationSeconds
+        self.transcriptText = transcriptText
+        self.waveformSamples = waveformSamples
+        self.coordinate = coordinate
+    }
+}
+
 public struct HeartbeatPayload: Codable, Sendable, Equatable {
     public let identity: NodeIdentity
     public let directPeers: [NodeIdentity]
+    public let coordinate: GeoCoordinate?
 
-    public init(identity: NodeIdentity, directPeers: [NodeIdentity] = []) {
+    public init(
+        identity: NodeIdentity,
+        directPeers: [NodeIdentity] = [],
+        coordinate: GeoCoordinate? = nil
+    ) {
         self.identity = identity
         self.directPeers = directPeers
+        self.coordinate = coordinate
     }
 }
 
@@ -221,6 +319,9 @@ public struct PeerSummary: Identifiable, Sendable, Equatable, Codable {
     public var linkKind: LinkKind
     public var lastRTTMilliseconds: Int?
     public var lastSeen: Date
+    public var trustState: PeerTrustState
+    public var conflictPublicKeyBase64: String?
+    public var lastCoordinate: GeoCoordinate?
 
     public var id: String { identity.nodeID }
 
@@ -228,12 +329,18 @@ public struct PeerSummary: Identifiable, Sendable, Equatable, Codable {
         identity: NodeIdentity,
         linkKind: LinkKind,
         lastRTTMilliseconds: Int? = nil,
-        lastSeen: Date = Date()
+        lastSeen: Date = Date(),
+        trustState: PeerTrustState = .unverifiedTOFU,
+        conflictPublicKeyBase64: String? = nil,
+        lastCoordinate: GeoCoordinate? = nil
     ) {
         self.identity = identity
         self.linkKind = linkKind
         self.lastRTTMilliseconds = lastRTTMilliseconds
         self.lastSeen = lastSeen
+        self.trustState = trustState
+        self.conflictPublicKeyBase64 = conflictPublicKeyBase64
+        self.lastCoordinate = lastCoordinate
     }
 }
 

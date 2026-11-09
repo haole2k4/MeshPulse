@@ -21,6 +21,7 @@ public struct SimulatedNodeState: Sendable {
     public var deliveryRTTMs: [UUID: Int] = [:]
     public var completedPings: [CompletedPingRecord] = []
     public var packetLogs: [PacketLogEntry] = []
+    public var mediaTransfers: [UUID: MediaTransferProgress] = [:]
 
     public var identity: NodeIdentity {
         router.localIdentity
@@ -179,15 +180,64 @@ public struct SimulatedMeshNetwork: Sendable {
             routingStrategy: routingStrategy,
             initialSprayCopies: initialSprayCopies
         )
+        let defaultCoord = Self.defaultSimulatedCoordinate(for: nodeID)
+        router.localCoordinate = defaultCoord
+
         // Share public key directory across existing simulated nodes so offline DTN E2EE works seamlessly
         for existingID in orderedNodeIDs {
             if let existing = nodesByID[existingID] {
-                router.registerPeerIdentity(existing.identity)
-                nodesByID[existingID]?.router.registerPeerIdentity(identity)
+                router.registerPeerIdentity(
+                    existing.identity,
+                    coordinate: existing.router.localCoordinate
+                )
+                nodesByID[existingID]?.router.registerPeerIdentity(
+                    identity,
+                    coordinate: defaultCoord
+                )
             }
         }
         nodesByID[nodeID] = SimulatedNodeState(router: router, sealer: sealer)
         orderedNodeIDs.append(nodeID)
+    }
+
+    public static func defaultSimulatedCoordinate(for nodeID: String) -> GeoCoordinate {
+        switch nodeID {
+        case Self.nodeAID:
+            // Center reference coordinate
+            return GeoCoordinate(
+                latitude: 10.772612,
+                longitude: 106.657891,
+                accuracyMeters: 5.5,
+                altitudeMeters: 14.0,
+                speedMetersPerSecond: 0.0
+            )
+        case Self.nodeBID:
+            // ~42m Northeast (Bearing ~45°)
+            return GeoCoordinate(
+                latitude: 10.772880,
+                longitude: 106.658165,
+                accuracyMeters: 4.8,
+                altitudeMeters: 16.5,
+                speedMetersPerSecond: 1.2
+            )
+        case Self.nodeCID:
+            // ~128m Southeast (Bearing ~130°)
+            return GeoCoordinate(
+                latitude: 10.771870,
+                longitude: 106.658790,
+                accuracyMeters: 6.2,
+                altitudeMeters: 21.0,
+                speedMetersPerSecond: 0.8
+            )
+        default:
+            return GeoCoordinate(
+                latitude: 10.772612,
+                longitude: 106.657891,
+                accuracyMeters: 6.0,
+                altitudeMeters: 15.0,
+                speedMetersPerSecond: 0.0
+            )
+        }
     }
 
     public mutating func setRoutingStrategy(
@@ -374,6 +424,160 @@ public struct SimulatedMeshNetwork: Sendable {
         return probeID
     }
 
+    @discardableResult
+    public mutating func sendVoiceNote(
+        from senderID: String,
+        to targetID: String = MeshPacket.broadcastTarget,
+        voiceNote: VoiceNotePayload,
+        encryptE2EE: Bool? = nil,
+        ttl: Int = 4,
+        settle: Bool = true
+    ) throws -> UUID {
+        guard let senderState = nodesByID[senderID] else {
+            preconditionFailure("Unknown simulated sender nodeID: \(senderID)")
+        }
+        let shouldEncrypt = encryptE2EE ?? (targetID != MeshPacket.broadcastTarget)
+        let sealer: (any EnvelopeSealer)? = shouldEncrypt ? senderState.sealer : nil
+        let recipientKey = nodesByID[targetID]?.identity.publicKeyBase64
+
+        let (packetID, effects) = try nodesByID[senderID]!.router.sendVoiceNote(
+            voiceNote: voiceNote,
+            to: targetID,
+            ttl: ttl,
+            sealer: sealer,
+            recipientPublicKeyBase64: recipientKey,
+            now: currentTime
+        )
+        processEffects(effects, on: senderID)
+        if settle {
+            runUntilQuiescent()
+        }
+        return packetID
+    }
+
+    @discardableResult
+    public mutating func sendMediaChunks(
+        from senderID: String,
+        to targetID: String = MeshPacket.broadcastTarget,
+        data: Data,
+        transferID: UUID = UUID(),
+        caption: String = "",
+        mimeType: String = "image/jpeg",
+        coordinate: GeoCoordinate? = nil,
+        chunkSize: Int = MeshChunker.defaultChunkSizeBytes,
+        encryptE2EE: Bool? = nil,
+        ttl: Int = 4,
+        settle: Bool = true
+    ) throws -> (transferID: UUID, chunkPacketIDs: [UUID]) {
+        guard let senderState = nodesByID[senderID] else {
+            preconditionFailure("Unknown simulated sender nodeID: \(senderID)")
+        }
+        let shouldEncrypt = encryptE2EE ?? (targetID != MeshPacket.broadcastTarget)
+        let sealer: (any EnvelopeSealer)? = shouldEncrypt ? senderState.sealer : nil
+        let recipientKey = nodesByID[targetID]?.identity.publicKeyBase64
+
+        let (resolvedTransferID, packetIDs, effects) = try nodesByID[senderID]!.router.sendMediaChunks(
+            data: data,
+            transferID: transferID,
+            caption: caption,
+            mimeType: mimeType,
+            to: targetID,
+            coordinate: coordinate,
+            chunkSize: chunkSize,
+            ttl: ttl,
+            sealer: sealer,
+            recipientPublicKeyBase64: recipientKey,
+            now: currentTime
+        )
+        processEffects(effects, on: senderID)
+        if settle {
+            runUntilQuiescent()
+        }
+        return (resolvedTransferID, packetIDs)
+    }
+
+    @discardableResult
+    public mutating func broadcastRollCall(
+        from senderID: String,
+        rollCall: SafetyRollCallState,
+        ttl: Int = 4,
+        settle: Bool = true
+    ) throws -> UUID {
+        guard nodesByID[senderID] != nil else {
+            preconditionFailure("Unknown simulated sender nodeID: \(senderID)")
+        }
+        let (packetID, effects) = try nodesByID[senderID]!.router.broadcastRollCall(
+            rollCall,
+            ttl: ttl,
+            now: currentTime
+        )
+        processEffects(effects, on: senderID)
+        if settle {
+            runUntilQuiescent()
+        }
+        return packetID
+    }
+
+    @discardableResult
+    public mutating func broadcastPoll(
+        from senderID: String,
+        poll: MeshPollState,
+        ttl: Int = 4,
+        settle: Bool = true
+    ) throws -> UUID {
+        guard nodesByID[senderID] != nil else {
+            preconditionFailure("Unknown simulated sender nodeID: \(senderID)")
+        }
+        let (packetID, effects) = try nodesByID[senderID]!.router.broadcastPoll(
+            poll,
+            ttl: ttl,
+            now: currentTime
+        )
+        processEffects(effects, on: senderID)
+        if settle {
+            runUntilQuiescent()
+        }
+        return packetID
+    }
+
+    @discardableResult
+    public mutating func verifyPeerOutOfBand(
+        on ownerNodeID: String,
+        peerID: String,
+        fingerprint: String,
+        publicKeyBase64: String? = nil
+    ) -> Bool {
+        guard nodesByID[ownerNodeID] != nil else { return false }
+        return nodesByID[ownerNodeID]!.router.verifyPeerOutOfBand(
+            nodeID: peerID,
+            fingerprint: fingerprint,
+            publicKeyBase64: publicKeyBase64,
+            now: currentTime
+        )
+    }
+
+    public mutating func simulateKeyConflict(
+        on ownerNodeID: String,
+        peerID: String,
+        conflictingPublicKeyBase64: String
+    ) {
+        nodesByID[ownerNodeID]?.router.simulateKeyConflict(
+            for: peerID,
+            conflictingPublicKeyBase64: conflictingPublicKeyBase64
+        )
+    }
+
+    public mutating func trustConflictingKey(
+        on ownerNodeID: String,
+        peerID: String,
+        markVerified: Bool = true
+    ) {
+        nodesByID[ownerNodeID]?.router.trustConflictingKey(
+            for: peerID,
+            markVerified: markVerified
+        )
+    }
+
     /// Injects a raw wire frame directly across an existing physical link (e.g. to verify ingress filtering).
     public mutating func injectDirectFrame(
         rawData: Data,
@@ -508,8 +712,67 @@ public struct SimulatedMeshNetwork: Sendable {
                 if let logs = nodesByID[originNodeID]?.packetLogs, logs.count > 500 {
                     nodesByID[originNodeID]?.packetLogs = Array(logs.suffix(500))
                 }
+
+            case let .mediaTransferUpdated(progress):
+                nodesByID[originNodeID]?.mediaTransfers[progress.transferID] = progress
+
+            case let .rollCallUpdated(rollCall):
+                maybeEnqueueMockRollCallVote(rollCall, on: originNodeID)
+
+            case let .pollUpdated(poll):
+                maybeEnqueueMockPollVote(poll, on: originNodeID)
+
+            case .securityKeyConflictDetected:
+                break
             }
         }
+    }
+
+    private mutating func maybeEnqueueMockRollCallVote(
+        _ rollCall: SafetyRollCallState,
+        on responderID: String
+    ) {
+        guard autoReplyEnabled,
+              responderID == Self.nodeBID || responderID == Self.nodeCID,
+              rollCall.responses[responderID] == nil
+        else {
+            return
+        }
+        var updated = rollCall
+        let responderName = nodesByID[responderID]?.identity.displayName ?? responderID
+        let status: SafetyStatus = (responderID == Self.nodeBID) ? .safe : .safe
+        let coord = nodesByID[responderID]?.router.localCoordinate
+        updated.recordVote(
+            nodeID: responderID,
+            displayName: responderName,
+            status: status,
+            coordinate: coord,
+            at: currentTime.addingTimeInterval(0.02)
+        )
+        _ = try? broadcastRollCall(from: responderID, rollCall: updated, settle: false)
+    }
+
+    private mutating func maybeEnqueueMockPollVote(
+        _ poll: MeshPollState,
+        on responderID: String
+    ) {
+        guard autoReplyEnabled,
+              responderID == Self.nodeBID || responderID == Self.nodeCID,
+              poll.votes[responderID] == nil,
+              !poll.options.isEmpty
+        else {
+            return
+        }
+        var updated = poll
+        let responderName = nodesByID[responderID]?.identity.displayName ?? responderID
+        let chosenIndex = (responderID == Self.nodeBID) ? 0 : min(1, poll.options.count - 1)
+        updated.castVote(
+            nodeID: responderID,
+            displayName: responderName,
+            optionIndex: chosenIndex,
+            at: currentTime.addingTimeInterval(0.02)
+        )
+        _ = try? broadcastPoll(from: responderID, poll: updated, settle: false)
     }
 
     private mutating func maybeEnqueueFriendlyAutoReply(
@@ -517,7 +780,7 @@ public struct SimulatedMeshNetwork: Sendable {
         on responderID: String
     ) {
         guard autoReplyEnabled,
-              message.packetType == .chat,
+              message.packetType == .chat || message.packetType == .voiceNote || message.packetType == .mediaChunk,
               responderID == Self.nodeBID || responderID == Self.nodeCID,
               message.senderID == Self.nodeAID,
               !autoRepliedPacketIDs.contains(message.id)

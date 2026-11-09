@@ -16,6 +16,8 @@ public struct NodeDetailCard: View {
     @State private var isActionsExpanded = false
     @State private var hasCopiedKey = false
     @State private var pingFeedbackCount = 0
+    @State private var showingCompassSheet = false
+    @State private var showingQRSheet = false
 
     public init(peer: PeerSummary, coordinator: MeshCoordinator) {
         self.peer = peer
@@ -45,6 +47,7 @@ public struct NodeDetailCard: View {
 
                     HStack(spacing: 6) {
                         LinkStatusBadge(linkKind: peer.linkKind)
+                        PeerTrustBadge(trustState: peer.trustState, compact: true)
                         if isBlocked {
                             Text("Đã chặn")
                                 .font(.system(size: 10, weight: .bold))
@@ -77,6 +80,34 @@ public struct NodeDetailCard: View {
                 .frame(width: 60, height: 60)
             }
             .padding(16)
+
+            if peer.trustState == .keyConflict {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(MeshTheme.sosCrimson)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("CẢNH BÁO: KHÓA CÔNG KHAI THAY ĐỔI")
+                            .font(.system(size: 11, weight: .heavy))
+                            .foregroundStyle(MeshTheme.sosCrimson)
+                        Text("Nghi vấn trạm bị tấn công giả mạo (MITM). Hãy quét QR xác thực.")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(MeshTheme.primaryText)
+                    }
+                    Spacer()
+                    Button("Xác thực") {
+                        showingQRSheet = true
+                    }
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(MeshTheme.sosCrimson, in: Capsule())
+                }
+                .padding(10)
+                .background(MeshTheme.sosCrimson.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal, 16)
+                .padding(.bottom, 6)
+            }
 
             Divider()
                 .overlay(MeshTheme.hairlineBorder)
@@ -129,6 +160,29 @@ public struct NodeDetailCard: View {
         .background(MeshTheme.cardSurface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .sensoryFeedback(.impact(weight: .light), trigger: pingFeedbackCount)
         .sensoryFeedback(.success, trigger: hasCopiedKey)
+        .sheet(isPresented: $showingCompassSheet) {
+            PeerCompassSheet(
+                localCoordinate: coordinator.latestLocalCoordinate,
+                peer: peer,
+                deviceHeading: coordinator.deviceHeading,
+                onHeadingSliderChanged: { coordinator.updateSimulatedHeading(degrees: $0) }
+            )
+        }
+        .sheet(isPresented: $showingQRSheet) {
+            QRTrustSheet(
+                localNode: coordinator.localIdentity,
+                targetPeer: peer,
+                onVerifyPeer: { peerID, fp in
+                    coordinator.verifyPeerOutOfBand(peerID: peerID, fingerprint: fp)
+                },
+                onTrustConflictingKey: { peerID in
+                    coordinator.trustConflictingKey(peerID: peerID)
+                },
+                onSimulateKeyConflict: { peerID in
+                    coordinator.mockSimulateKeyConflict(peerID: peerID)
+                }
+            )
+        }
     }
 
     // MARK: - Subcomponents
@@ -317,6 +371,35 @@ public struct NodeDetailCard: View {
                                 (isBlocked ? MeshTheme.emerald : MeshTheme.sosCrimson).opacity(0.14),
                                 in: RoundedRectangle(cornerRadius: 12, style: .continuous)
                             )
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                HStack(spacing: 8) {
+                    // Precision Finding Compass Button
+                    Button {
+                        coordinator.startHeadingUpdates()
+                        showingCompassSheet = true
+                    } label: {
+                        Label("Dò vị trí", systemImage: "location.north.circle.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(MeshTheme.emerald)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 38)
+                            .background(MeshTheme.emerald.opacity(0.14), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+
+                    // QR Verification Button
+                    Button {
+                        showingQRSheet = true
+                    } label: {
+                        Label("Mã QR", systemImage: "qrcode.viewfinder")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(MeshTheme.meshCyan)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 38)
+                            .background(MeshTheme.meshCyan.opacity(0.14), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                     .buttonStyle(.plain)
                 }

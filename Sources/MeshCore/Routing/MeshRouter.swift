@@ -34,6 +34,8 @@ public struct ReceivedMeshMessage: Identifiable, Sendable, Equatable, Codable {
     public let remainingTTL: Int
     public let isEncrypted: Bool
     public let timestamp: Date
+    public var voiceNote: VoiceNotePayload?
+    public var imageJPEGData: Data?
 
     public init(
         id: UUID,
@@ -48,7 +50,9 @@ public struct ReceivedMeshMessage: Identifiable, Sendable, Equatable, Codable {
         hopCount: Int,
         remainingTTL: Int,
         isEncrypted: Bool,
-        timestamp: Date
+        timestamp: Date,
+        voiceNote: VoiceNotePayload? = nil,
+        imageJPEGData: Data? = nil
     ) {
         self.id = id
         self.packetType = packetType
@@ -63,6 +67,8 @@ public struct ReceivedMeshMessage: Identifiable, Sendable, Equatable, Codable {
         self.remainingTTL = remainingTTL
         self.isEncrypted = isEncrypted
         self.timestamp = timestamp
+        self.voiceNote = voiceNote
+        self.imageJPEGData = imageJPEGData
     }
 }
 
@@ -124,6 +130,10 @@ public enum RouterEffect: Sendable, Equatable {
     case deliveryUpdated(packetID: UUID, state: DeliveryState, routeNames: [String], rttMs: Int?)
     case pingCompleted(peerID: String, rttMs: Int, hops: Int)
     case packetLogged(PacketLogEntry)
+    case mediaTransferUpdated(MediaTransferProgress)
+    case rollCallUpdated(SafetyRollCallState)
+    case pollUpdated(MeshPollState)
+    case securityKeyConflictDetected(peerID: String, peerName: String, pinnedKeyBase64: String, conflictingKeyBase64: String)
 }
 
 // MARK: - Unified Mesh & DTN Router (Pure Value-State Engine)
@@ -142,20 +152,27 @@ public struct MeshRouter: Sendable {
     }
 
     public var localIdentity: NodeIdentity
+    public var localCoordinate: GeoCoordinate?
     public var routingStrategy: RoutingStrategy
     public var initialSprayCopies: Int
     public var blockedPeerIDs: Set<String>
     public var seenCache: BoundedSeenCache
     public var dtnOutbox: DTNOutbox
     public var telemetry: TelemetrySnapshot
+    public var activeRollCall: SafetyRollCallState?
+    public var activePoll: MeshPollState?
 
     private var rawDirectPeers: [String: NodeIdentity] = [:]
     private var knownPeerIdentities: [String: NodeIdentity] = [:]
     private var peerLastSeen: [String: Date] = [:]
     private var peerRTTMs: [String: Int] = [:]
+    private var peerTrustStates: [String: PeerTrustState] = [:]
+    private var peerConflictKeys: [String: String] = [:]
+    private var peerCoordinates: [String: GeoCoordinate] = [:]
     private var learnedRoutes: [String: LearnedRoute] = [:]
     private var heartbeatNeighborsByPeer: [String: [NodeIdentity]] = [:]
     private var pendingPings: [UUID: PendingPing] = [:]
+    private var chunkAssembler = ChunkAssembler()
 
     public init(
         localIdentity: NodeIdentity,
@@ -211,7 +228,10 @@ public struct MeshRouter: Sendable {
                     identity: identity,
                     linkKind: linkKind,
                     lastRTTMilliseconds: peerRTTMs[peerID],
-                    lastSeen: peerLastSeen[peerID] ?? .distantPast
+                    lastSeen: peerLastSeen[peerID] ?? .distantPast,
+                    trustState: peerTrustStates[peerID] ?? .unverifiedTOFU,
+                    conflictPublicKeyBase64: peerConflictKeys[peerID],
+                    lastCoordinate: peerCoordinates[peerID]
                 )
             )
         }
@@ -256,16 +276,109 @@ public struct MeshRouter: Sendable {
     }
 
     /// Pre-registers a known peer identity (e.g. out-of-band / QR public key or Mock Mode directory).
-    public mutating func registerPeerIdentity(_ identity: NodeIdentity, lastSeen: Date? = nil) {
+    public mutating func registerPeerIdentity(
+        _ identity: NodeIdentity,
+        lastSeen: Date? = nil,
+        coordinate: GeoCoordinate? = nil
+    ) {
         guard identity.nodeID != localIdentity.nodeID else { return }
-        knownPeerIdentities[identity.nodeID] = mergedIdentity(existing: knownPeerIdentities[identity.nodeID], incoming: identity)
+        _ = ingestPeerIdentity(identity)
         if let lastSeen {
             peerLastSeen[identity.nodeID] = max(peerLastSeen[identity.nodeID] ?? .distantPast, lastSeen)
         }
+        if let coordinate {
+            peerCoordinates[identity.nodeID] = coordinate
+        }
     }
 
-    public mutating func broadcastHeartbeat(now: Date = Date()) -> [RouterEffect] {
-        emitHeartbeat(to: Array(activeDirectPeerIDs).sorted(), now: now)
+    public mutating func restorePeerRecord(_ record: KnownPeerRecord) {
+        let peerID = record.identity.nodeID
+        guard peerID != localIdentity.nodeID else { return }
+        knownPeerIdentities[peerID] = record.identity
+        peerTrustStates[peerID] = record.trustState
+        if let conflictKey = record.conflictPublicKeyBase64, !conflictKey.isEmpty {
+            peerConflictKeys[peerID] = conflictKey
+        }
+        peerLastSeen[peerID] = max(peerLastSeen[peerID] ?? .distantPast, record.lastSeen)
+        if let coord = record.lastCoordinate {
+            peerCoordinates[peerID] = coord
+        }
+    }
+
+    public mutating func updatePeerCoordinate(_ coordinate: GeoCoordinate, for peerID: String) {
+        guard peerID != localIdentity.nodeID else {
+            localCoordinate = coordinate
+            return
+        }
+        peerCoordinates[peerID] = coordinate
+    }
+
+    /// Out-of-Band QR verification (`meshpulse://verify?node=<id>&fp=<fingerprint>[&key=<base64>]`).
+    /// Pins the verified key, clears any MITM key conflict, and upgrades trust state to `.verifiedOutOfBand`.
+    @discardableResult
+    public mutating func verifyPeerOutOfBand(
+        nodeID: String,
+        fingerprint: String,
+        publicKeyBase64: String? = nil,
+        displayName: String? = nil,
+        now: Date = Date()
+    ) -> Bool {
+        guard nodeID != localIdentity.nodeID, !nodeID.isEmpty, !fingerprint.isEmpty else {
+            return false
+        }
+        let normalizedFP = fingerprint.uppercased()
+        let existing = knownPeerIdentities[nodeID]
+        let candidateKey =
+            (publicKeyBase64?.isEmpty == false ? publicKeyBase64 : nil)
+            ?? peerConflictKeys[nodeID]
+            ?? existing?.publicKeyBase64
+
+        if let candidateKey {
+            let tempIdentity = NodeIdentity(nodeID: nodeID, displayName: displayName ?? existing?.displayName ?? nodeID, publicKeyBase64: candidateKey)
+            guard let computedFP = tempIdentity.publicKeyFingerprint?.uppercased(),
+                  computedFP == normalizedFP
+            else {
+                return false
+            }
+            knownPeerIdentities[nodeID] = tempIdentity
+        } else if let existingFP = existing?.publicKeyFingerprint?.uppercased(), existingFP != normalizedFP {
+            return false
+        }
+
+        peerTrustStates[nodeID] = .verifiedOutOfBand
+        peerConflictKeys.removeValue(forKey: nodeID)
+        peerLastSeen[nodeID] = max(peerLastSeen[nodeID] ?? .distantPast, now)
+        return true
+    }
+
+    /// Simulates or records a TOFU key conflict (Man-in-the-Middle warning) for testing or UI inspection.
+    public mutating func simulateKeyConflict(for peerID: String, conflictingPublicKeyBase64: String) {
+        guard peerID != localIdentity.nodeID, !conflictingPublicKeyBase64.isEmpty else { return }
+        peerTrustStates[peerID] = .keyConflict
+        peerConflictKeys[peerID] = conflictingPublicKeyBase64
+    }
+
+    /// Explicitly accepts a conflicting public key (e.g., after peer reinstalled the app and verified QR).
+    public mutating func trustConflictingKey(for peerID: String, markVerified: Bool = true) {
+        guard let newKey = peerConflictKeys.removeValue(forKey: peerID),
+              var current = knownPeerIdentities[peerID]
+        else {
+            peerTrustStates[peerID] = markVerified ? .verifiedOutOfBand : .unverifiedTOFU
+            return
+        }
+        current.publicKeyBase64 = newKey
+        knownPeerIdentities[peerID] = current
+        peerTrustStates[peerID] = markVerified ? .verifiedOutOfBand : .unverifiedTOFU
+    }
+
+    public mutating func broadcastHeartbeat(
+        coordinate: GeoCoordinate? = nil,
+        now: Date = Date()
+    ) -> [RouterEffect] {
+        if let coordinate {
+            localCoordinate = coordinate
+        }
+        return emitHeartbeat(to: Array(activeDirectPeerIDs).sorted(), now: now)
     }
 
     public mutating func updateLocalProfile(
@@ -311,11 +424,12 @@ public struct MeshRouter: Sendable {
     ) -> [RouterEffect] {
         let previousActive = activeDirectPeerIDs
         var nextRaw: [String: NodeIdentity] = [:]
+        var conflictEffects: [RouterEffect] = []
 
         for peer in peers where peer.nodeID != localIdentity.nodeID {
-            let merged = mergedIdentity(existing: knownPeerIdentities[peer.nodeID], incoming: peer)
+            let (merged, effects) = ingestPeerIdentity(peer)
+            conflictEffects.append(contentsOf: effects)
             nextRaw[peer.nodeID] = merged
-            knownPeerIdentities[peer.nodeID] = merged
             if !blockedPeerIDs.contains(peer.nodeID) {
                 peerLastSeen[peer.nodeID] = now
             }
@@ -326,7 +440,7 @@ public struct MeshRouter: Sendable {
         heartbeatNeighborsByPeer = heartbeatNeighborsByPeer.filter { currentActive.contains($0.key) }
         learnedRoutes = learnedRoutes.filter { currentActive.contains($0.value.viaNodeID) }
 
-        return handleActivePeerTransition(previousActive: previousActive, now: now)
+        return conflictEffects + handleActivePeerTransition(previousActive: previousActive, now: now)
     }
 
     private mutating func handleActivePeerTransition(
@@ -400,6 +514,187 @@ public struct MeshRouter: Sendable {
         )
 
         let effects = try dispatchOriginChatOrSOS(packet: packet, now: now)
+        return (packet.id, effects)
+    }
+
+    public mutating func sendVoiceNote(
+        voiceNote: VoiceNotePayload,
+        to targetID: String = MeshPacket.broadcastTarget,
+        ttl: Int = 4,
+        sealer: (any EnvelopeSealer)? = nil,
+        recipientPublicKeyBase64: String? = nil,
+        now: Date = Date()
+    ) throws -> (packetID: UUID, effects: [RouterEffect]) {
+        let clearData = try Self.encodeJSON(voiceNote)
+        let isBroadcast = (targetID == MeshPacket.broadcastTarget)
+        let payloadData: Data
+        let isEncrypted: Bool
+        let senderPublicKeyBase64: String?
+
+        if !isBroadcast, let sealer {
+            let resolvedKey = recipientPublicKeyBase64 ?? knownPeerIdentities[targetID]?.publicKeyBase64
+            guard let recipientKey = resolvedKey, !recipientKey.isEmpty else {
+                throw MeshCryptoError.missingRecipientKey
+            }
+            payloadData = try sealer.seal(plaintext: clearData, recipientPublicKeyBase64: recipientKey)
+            isEncrypted = true
+            senderPublicKeyBase64 = sealer.publicKeyBase64
+        } else {
+            payloadData = clearData
+            isEncrypted = false
+            senderPublicKeyBase64 = nil
+        }
+
+        let copies = (!isBroadcast && routingStrategy == .sprayAndWait) ? initialSprayCopies : 1
+        let packet = MeshPacket(
+            type: .voiceNote,
+            senderID: localIdentity.nodeID,
+            senderName: localIdentity.displayName,
+            targetID: targetID,
+            routePath: [localIdentity.nodeID],
+            routeNames: [localIdentity.displayName],
+            ttl: max(1, ttl),
+            remainingCopies: copies,
+            timestamp: now,
+            isEncrypted: isEncrypted,
+            senderPublicKeyBase64: senderPublicKeyBase64,
+            payload: payloadData
+        )
+
+        let effects = try dispatchOriginChatOrSOS(packet: packet, now: now)
+        return (packet.id, effects)
+    }
+
+    public mutating func sendMediaChunks(
+        data: Data,
+        transferID: UUID = UUID(),
+        caption: String = "",
+        mimeType: String = "image/jpeg",
+        to targetID: String = MeshPacket.broadcastTarget,
+        coordinate: GeoCoordinate? = nil,
+        chunkSize: Int = MeshChunker.defaultChunkSizeBytes,
+        ttl: Int = 4,
+        sealer: (any EnvelopeSealer)? = nil,
+        recipientPublicKeyBase64: String? = nil,
+        now: Date = Date()
+    ) throws -> (transferID: UUID, chunkPacketIDs: [UUID], effects: [RouterEffect]) {
+        let chunks = MeshChunker.split(
+            data: data,
+            transferID: transferID,
+            caption: caption,
+            mimeType: mimeType,
+            coordinate: coordinate,
+            chunkSize: chunkSize
+        )
+        let isBroadcast = (targetID == MeshPacket.broadcastTarget)
+        var allEffects: [RouterEffect] = []
+        var packetIDs: [UUID] = []
+
+        for (idx, chunk) in chunks.enumerated() {
+            let clearData = try Self.encodeJSON(chunk)
+            let payloadData: Data
+            let isEncrypted: Bool
+            let senderPublicKeyBase64: String?
+
+            if !isBroadcast, let sealer {
+                let resolvedKey = recipientPublicKeyBase64 ?? knownPeerIdentities[targetID]?.publicKeyBase64
+                guard let recipientKey = resolvedKey, !recipientKey.isEmpty else {
+                    throw MeshCryptoError.missingRecipientKey
+                }
+                payloadData = try sealer.seal(plaintext: clearData, recipientPublicKeyBase64: recipientKey)
+                isEncrypted = true
+                senderPublicKeyBase64 = sealer.publicKeyBase64
+            } else {
+                payloadData = clearData
+                isEncrypted = false
+                senderPublicKeyBase64 = nil
+            }
+
+            // Use `transferID` as the final chunk's packet ID so `.ack` for the completed transfer directly correlates with `transferID`!
+            let packetID = (idx == chunks.count - 1) ? transferID : UUID()
+            let copies = (!isBroadcast && routingStrategy == .sprayAndWait) ? initialSprayCopies : 1
+            let packet = MeshPacket(
+                id: packetID,
+                type: .mediaChunk,
+                senderID: localIdentity.nodeID,
+                senderName: localIdentity.displayName,
+                targetID: targetID,
+                routePath: [localIdentity.nodeID],
+                routeNames: [localIdentity.displayName],
+                ttl: max(1, ttl),
+                remainingCopies: copies,
+                timestamp: now,
+                isEncrypted: isEncrypted,
+                senderPublicKeyBase64: senderPublicKeyBase64,
+                payload: payloadData
+            )
+            packetIDs.append(packetID)
+            let chunkEffects = try dispatchOriginChatOrSOS(packet: packet, now: now)
+            allEffects.append(contentsOf: chunkEffects)
+        }
+
+        return (transferID, packetIDs, allEffects)
+    }
+
+    public mutating func broadcastRollCall(
+        _ rollCall: SafetyRollCallState,
+        ttl: Int = 4,
+        now: Date = Date()
+    ) throws -> (packetID: UUID, effects: [RouterEffect]) {
+        if var existing = activeRollCall, existing.id == rollCall.id {
+            existing.merge(rollCall)
+            activeRollCall = existing
+        } else {
+            activeRollCall = rollCall
+        }
+        let stateToSend = activeRollCall ?? rollCall
+        let payloadData = try Self.encodeJSON(stateToSend)
+        let packet = MeshPacket(
+            type: .rollCall,
+            senderID: localIdentity.nodeID,
+            senderName: localIdentity.displayName,
+            targetID: MeshPacket.broadcastTarget,
+            routePath: [localIdentity.nodeID],
+            routeNames: [localIdentity.displayName],
+            ttl: max(1, ttl),
+            remainingCopies: 1,
+            timestamp: now,
+            isEncrypted: false,
+            payload: payloadData
+        )
+        var effects = try dispatchOriginChatOrSOS(packet: packet, now: now)
+        effects.append(.rollCallUpdated(stateToSend))
+        return (packet.id, effects)
+    }
+
+    public mutating func broadcastPoll(
+        _ poll: MeshPollState,
+        ttl: Int = 4,
+        now: Date = Date()
+    ) throws -> (packetID: UUID, effects: [RouterEffect]) {
+        if var existing = activePoll, existing.id == poll.id {
+            existing.merge(poll)
+            activePoll = existing
+        } else {
+            activePoll = poll
+        }
+        let stateToSend = activePoll ?? poll
+        let payloadData = try Self.encodeJSON(stateToSend)
+        let packet = MeshPacket(
+            type: .poll,
+            senderID: localIdentity.nodeID,
+            senderName: localIdentity.displayName,
+            targetID: MeshPacket.broadcastTarget,
+            routePath: [localIdentity.nodeID],
+            routeNames: [localIdentity.displayName],
+            ttl: max(1, ttl),
+            remainingCopies: 1,
+            timestamp: now,
+            isEncrypted: false,
+            payload: payloadData
+        )
+        var effects = try dispatchOriginChatOrSOS(packet: packet, now: now)
+        effects.append(.pollUpdated(stateToSend))
         return (packet.id, effects)
     }
 
@@ -517,7 +812,7 @@ public struct MeshRouter: Sendable {
         }
 
         telemetry.rxPackets += 1
-        learnTopologyFromPacket(packet, fromDirectPeerID: fromDirectPeerID, now: now)
+        let topologyEffects = learnTopologyFromPacket(packet, fromDirectPeerID: fromDirectPeerID, now: now)
 
         var effects: [RouterEffect] = [
             .packetLogged(
@@ -531,6 +826,7 @@ public struct MeshRouter: Sendable {
                 )
             )
         ]
+        effects.append(contentsOf: topologyEffects)
 
         switch packet.type {
         case .heartbeat:
@@ -562,6 +858,52 @@ public struct MeshRouter: Sendable {
                     now: now
                 )
             )
+
+        case .voiceNote:
+            effects.append(
+                contentsOf: handleVoiceNote(
+                    packet,
+                    rawData: rawData,
+                    rawJSON: rawJSON,
+                    fromDirectPeerID: fromDirectPeerID,
+                    sealer: sealer,
+                    now: now
+                )
+            )
+
+        case .mediaChunk:
+            effects.append(
+                contentsOf: handleMediaChunk(
+                    packet,
+                    rawData: rawData,
+                    rawJSON: rawJSON,
+                    fromDirectPeerID: fromDirectPeerID,
+                    sealer: sealer,
+                    now: now
+                )
+            )
+
+        case .rollCall:
+            effects.append(
+                contentsOf: handleRollCall(
+                    packet,
+                    rawData: rawData,
+                    rawJSON: rawJSON,
+                    fromDirectPeerID: fromDirectPeerID,
+                    now: now
+                )
+            )
+
+        case .poll:
+            effects.append(
+                contentsOf: handlePoll(
+                    packet,
+                    rawData: rawData,
+                    rawJSON: rawJSON,
+                    fromDirectPeerID: fromDirectPeerID,
+                    now: now
+                )
+            )
         }
 
         return effects
@@ -578,15 +920,19 @@ public struct MeshRouter: Sendable {
             return []
         }
 
-        let sender = mergedIdentity(existing: knownPeerIdentities[hb.identity.nodeID], incoming: hb.identity)
-        knownPeerIdentities[sender.nodeID] = sender
+        var effects: [RouterEffect] = []
+        let (sender, conflictEffects) = ingestPeerIdentity(hb.identity)
+        effects.append(contentsOf: conflictEffects)
         if rawDirectPeers[sender.nodeID] != nil {
             rawDirectPeers[sender.nodeID] = sender
         }
         peerLastSeen[sender.nodeID] = now
+        if let coord = hb.coordinate {
+            peerCoordinates[sender.nodeID] = coord
+        }
 
         guard activeDirectPeerIDs.contains(fromDirectPeerID), sender.nodeID == fromDirectPeerID else {
-            return []
+            return effects
         }
 
         let previousRoutes = learnedRoutes
@@ -596,10 +942,8 @@ public struct MeshRouter: Sendable {
 
         var newlyReachableTargets: [String] = []
         for neighbor in hb.directPeers where neighbor.nodeID != localIdentity.nodeID {
-            knownPeerIdentities[neighbor.nodeID] = mergedIdentity(
-                existing: knownPeerIdentities[neighbor.nodeID],
-                incoming: neighbor
-            )
+            let (_, neighborConflictEffects) = ingestPeerIdentity(neighbor)
+            effects.append(contentsOf: neighborConflictEffects)
             if !activeDirectPeerIDs.contains(neighbor.nodeID) {
                 learnedRoutes[neighbor.nodeID] = LearnedRoute(
                     viaNodeID: fromDirectPeerID,
@@ -613,7 +957,6 @@ public struct MeshRouter: Sendable {
             }
         }
 
-        var effects: [RouterEffect] = []
         if !newlyReachableTargets.isEmpty {
             effects.append(contentsOf: flushOutboxForLearnedTwoHop(viaPeerID: fromDirectPeerID, targets: Set(newlyReachableTargets), now: now))
         }
@@ -858,6 +1201,254 @@ public struct MeshRouter: Sendable {
             )
         }
 
+        return effects
+    }
+
+    private mutating func handleVoiceNote(
+        _ packet: MeshPacket,
+        rawData: Data,
+        rawJSON: String,
+        fromDirectPeerID: String,
+        sealer: (any EnvelopeSealer)?,
+        now: Date
+    ) -> [RouterEffect] {
+        var effects: [RouterEffect] = []
+        let isForLocalNode = packet.isBroadcast || packet.targetID == localIdentity.nodeID
+
+        if isForLocalNode {
+            if let clearBytes = openPayloadIfNeeded(packet: packet, sealer: sealer),
+               let voice = try? Self.decodeJSON(VoiceNotePayload.self, from: clearBytes)
+            {
+                if let coord = voice.coordinate {
+                    peerCoordinates[packet.senderID] = coord
+                }
+                let fullRoutePath =
+                    packet.routePath.last == localIdentity.nodeID
+                    ? packet.routePath
+                    : packet.routePath + [localIdentity.nodeID]
+                let fullRouteNames =
+                    packet.routeNames.last == localIdentity.displayName
+                    ? packet.routeNames
+                    : packet.routeNames + [localIdentity.displayName]
+
+                let msg = ReceivedMeshMessage(
+                    id: packet.id,
+                    packetType: .voiceNote,
+                    senderID: packet.senderID,
+                    senderName: packet.senderName,
+                    targetID: packet.targetID,
+                    text: voice.transcriptText.isEmpty ? "🎙️ Tin nhắn bộ đàm (\(Int(voice.durationSeconds.rounded()))s)" : voice.transcriptText,
+                    coordinate: voice.coordinate,
+                    routePath: fullRoutePath,
+                    routeNames: fullRouteNames,
+                    hopCount: packet.hopCount,
+                    remainingTTL: packet.ttl,
+                    isEncrypted: packet.isEncrypted,
+                    timestamp: packet.timestamp,
+                    voiceNote: voice
+                )
+                effects.append(.messageReceived(msg))
+
+                if !packet.isBroadcast, packet.targetID == localIdentity.nodeID {
+                    effects.append(
+                        contentsOf: emitAck(
+                            for: packet,
+                            arrivedFromDirectPeerID: fromDirectPeerID,
+                            now: now
+                        )
+                    )
+                }
+            }
+        }
+
+        if packet.isBroadcast || packet.targetID != localIdentity.nodeID {
+            effects.append(
+                contentsOf: relayChatOrSOSPacket(
+                    packet,
+                    rawData: rawData,
+                    rawJSON: rawJSON,
+                    fromDirectPeerID: fromDirectPeerID,
+                    now: now
+                )
+            )
+        }
+
+        return effects
+    }
+
+    private mutating func handleMediaChunk(
+        _ packet: MeshPacket,
+        rawData: Data,
+        rawJSON: String,
+        fromDirectPeerID: String,
+        sealer: (any EnvelopeSealer)?,
+        now: Date
+    ) -> [RouterEffect] {
+        var effects: [RouterEffect] = []
+        let isForLocalNode = packet.isBroadcast || packet.targetID == localIdentity.nodeID
+
+        if isForLocalNode {
+            if let clearBytes = openPayloadIfNeeded(packet: packet, sealer: sealer),
+               let chunk = try? Self.decodeJSON(MediaChunkPayload.self, from: clearBytes)
+            {
+                if let coord = chunk.coordinate {
+                    peerCoordinates[packet.senderID] = coord
+                }
+                let fullRoutePath =
+                    packet.routePath.last == localIdentity.nodeID
+                    ? packet.routePath
+                    : packet.routePath + [localIdentity.nodeID]
+                let fullRouteNames =
+                    packet.routeNames.last == localIdentity.displayName
+                    ? packet.routeNames
+                    : packet.routeNames + [localIdentity.displayName]
+
+                if let progress = chunkAssembler.ingest(
+                    chunk: chunk,
+                    senderID: packet.senderID,
+                    senderName: packet.senderName,
+                    targetID: packet.targetID,
+                    routeNames: fullRouteNames,
+                    hopCount: packet.hopCount,
+                    isEncrypted: packet.isEncrypted,
+                    now: now
+                ) {
+                    effects.append(.mediaTransferUpdated(progress))
+                    if let assembledData = progress.assembledData {
+                        let captionText =
+                            chunk.caption.isEmpty
+                            ? "📷 Ảnh nén Mesh (\(max(1, assembledData.count / 1024)) KB · \(progress.totalChunks) mảnh)"
+                            : chunk.caption
+                        let msg = ReceivedMeshMessage(
+                            id: progress.transferID,
+                            packetType: .mediaChunk,
+                            senderID: packet.senderID,
+                            senderName: packet.senderName,
+                            targetID: packet.targetID,
+                            text: captionText,
+                            coordinate: chunk.coordinate,
+                            routePath: fullRoutePath,
+                            routeNames: fullRouteNames,
+                            hopCount: packet.hopCount,
+                            remainingTTL: packet.ttl,
+                            isEncrypted: packet.isEncrypted,
+                            timestamp: packet.timestamp,
+                            imageJPEGData: assembledData
+                        )
+                        effects.append(.messageReceived(msg))
+
+                        if !packet.isBroadcast, packet.targetID == localIdentity.nodeID {
+                            var ackAnchor = packet
+                            ackAnchor = MeshPacket(
+                                id: progress.transferID,
+                                type: .mediaChunk,
+                                senderID: packet.senderID,
+                                senderName: packet.senderName,
+                                targetID: packet.targetID,
+                                routePath: packet.routePath,
+                                routeNames: packet.routeNames,
+                                ttl: packet.ttl,
+                                remainingCopies: 1,
+                                timestamp: packet.timestamp,
+                                isEncrypted: packet.isEncrypted,
+                                payload: Data()
+                            )
+                            effects.append(
+                                contentsOf: emitAck(
+                                    for: ackAnchor,
+                                    arrivedFromDirectPeerID: fromDirectPeerID,
+                                    now: now
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        if packet.isBroadcast || packet.targetID != localIdentity.nodeID {
+            effects.append(
+                contentsOf: relayChatOrSOSPacket(
+                    packet,
+                    rawData: rawData,
+                    rawJSON: rawJSON,
+                    fromDirectPeerID: fromDirectPeerID,
+                    now: now
+                )
+            )
+        }
+
+        return effects
+    }
+
+    private mutating func handleRollCall(
+        _ packet: MeshPacket,
+        rawData: Data,
+        rawJSON: String,
+        fromDirectPeerID: String,
+        now: Date
+    ) -> [RouterEffect] {
+        var effects: [RouterEffect] = []
+        if let incoming = try? Self.decodeJSON(SafetyRollCallState.self, from: packet.payload) {
+            for vote in incoming.responses.values {
+                if let coord = vote.coordinate, vote.voterNodeID != localIdentity.nodeID {
+                    peerCoordinates[vote.voterNodeID] = coord
+                }
+            }
+            if var current = activeRollCall, current.id == incoming.id {
+                current.merge(incoming)
+                activeRollCall = current
+                effects.append(.rollCallUpdated(current))
+            } else {
+                activeRollCall = incoming
+                effects.append(.rollCallUpdated(incoming))
+            }
+        }
+
+        if packet.isBroadcast || packet.targetID != localIdentity.nodeID {
+            effects.append(
+                contentsOf: relayChatOrSOSPacket(
+                    packet,
+                    rawData: rawData,
+                    rawJSON: rawJSON,
+                    fromDirectPeerID: fromDirectPeerID,
+                    now: now
+                )
+            )
+        }
+        return effects
+    }
+
+    private mutating func handlePoll(
+        _ packet: MeshPacket,
+        rawData: Data,
+        rawJSON: String,
+        fromDirectPeerID: String,
+        now: Date
+    ) -> [RouterEffect] {
+        var effects: [RouterEffect] = []
+        if let incoming = try? Self.decodeJSON(MeshPollState.self, from: packet.payload) {
+            if var current = activePoll, current.id == incoming.id {
+                current.merge(incoming)
+                activePoll = current
+                effects.append(.pollUpdated(current))
+            } else {
+                activePoll = incoming
+                effects.append(.pollUpdated(incoming))
+            }
+        }
+
+        if packet.isBroadcast || packet.targetID != localIdentity.nodeID {
+            effects.append(
+                contentsOf: relayChatOrSOSPacket(
+                    packet,
+                    rawData: rawData,
+                    rawJSON: rawJSON,
+                    fromDirectPeerID: fromDirectPeerID,
+                    now: now
+                )
+            )
+        }
         return effects
     }
 
@@ -1378,7 +1969,11 @@ public struct MeshRouter: Sendable {
     ) -> [RouterEffect] {
         guard !recipients.isEmpty,
               let payloadData = try? Self.encodeJSON(
-                  HeartbeatPayload(identity: localIdentity, directPeers: activeDirectPeers)
+                  HeartbeatPayload(
+                      identity: localIdentity,
+                      directPeers: activeDirectPeers,
+                      coordinate: localCoordinate
+                  )
               )
         else {
             return []
@@ -1514,8 +2109,9 @@ public struct MeshRouter: Sendable {
         _ packet: MeshPacket,
         fromDirectPeerID: String,
         now: Date
-    ) {
+    ) -> [RouterEffect] {
         peerLastSeen[fromDirectPeerID] = now
+        var effects: [RouterEffect] = []
         if packet.senderID != localIdentity.nodeID {
             let incomingKey =
                 (packet.senderPublicKeyBase64?.isEmpty == false)
@@ -1526,10 +2122,8 @@ public struct MeshRouter: Sendable {
                 displayName: packet.senderName,
                 publicKeyBase64: incomingKey
             )
-            knownPeerIdentities[packet.senderID] = mergedIdentity(
-                existing: knownPeerIdentities[packet.senderID],
-                incoming: senderIdentity
-            )
+            let (_, conflictEffects) = ingestPeerIdentity(senderIdentity)
+            effects.append(contentsOf: conflictEffects)
             peerLastSeen[packet.senderID] = now
 
             if !activeDirectPeerIDs.contains(packet.senderID),
@@ -1544,13 +2138,13 @@ public struct MeshRouter: Sendable {
                 )
             }
         }
+        return effects
     }
 
-    private func decodeReceivedMessage(
+    private func openPayloadIfNeeded(
         packet: MeshPacket,
         sealer: (any EnvelopeSealer)?
-    ) -> ReceivedMeshMessage? {
-        let clearBytes: Data
+    ) -> Data? {
         if packet.isEncrypted {
             let pinnedKey = knownPeerIdentities[packet.senderID]?.publicKeyBase64
             let effectiveSenderKey =
@@ -1563,13 +2157,22 @@ public struct MeshRouter: Sendable {
             else {
                 return nil
             }
-            clearBytes = opened
-        } else {
-            clearBytes = packet.payload
+            return opened
         }
+        return packet.payload
+    }
 
-        guard let chat = try? Self.decodeJSON(ChatMessagePayload.self, from: clearBytes) else {
+    private mutating func decodeReceivedMessage(
+        packet: MeshPacket,
+        sealer: (any EnvelopeSealer)?
+    ) -> ReceivedMeshMessage? {
+        guard let clearBytes = openPayloadIfNeeded(packet: packet, sealer: sealer),
+              let chat = try? Self.decodeJSON(ChatMessagePayload.self, from: clearBytes)
+        else {
             return nil
+        }
+        if let coord = chat.coordinate, packet.senderID != localIdentity.nodeID {
+            peerCoordinates[packet.senderID] = coord
         }
 
         let fullRoutePath =
@@ -1648,16 +2251,47 @@ public struct MeshRouter: Sendable {
         )
     }
 
-    private func mergedIdentity(existing: NodeIdentity?, incoming: NodeIdentity) -> NodeIdentity {
-        guard let existing else { return incoming }
-        let existingKey = (existing.publicKeyBase64?.isEmpty == false) ? existing.publicKeyBase64 : nil
+    @discardableResult
+    private mutating func ingestPeerIdentity(
+        _ incoming: NodeIdentity
+    ) -> (merged: NodeIdentity, effects: [RouterEffect]) {
+        let peerID = incoming.nodeID
         let incomingKey = (incoming.publicKeyBase64?.isEmpty == false) ? incoming.publicKeyBase64 : nil
-        return NodeIdentity(
-            nodeID: incoming.nodeID,
+
+        guard let existing = knownPeerIdentities[peerID] else {
+            knownPeerIdentities[peerID] = incoming
+            if peerTrustStates[peerID] == nil {
+                peerTrustStates[peerID] = .unverifiedTOFU
+            }
+            return (incoming, [])
+        }
+
+        let existingKey = (existing.publicKeyBase64?.isEmpty == false) ? existing.publicKeyBase64 : nil
+        var effects: [RouterEffect] = []
+
+        if let existingKey, let incomingKey, existingKey != incomingKey {
+            // TOFU security invariant: never overwrite an already-pinned public key; flag MITM key conflict!
+            peerTrustStates[peerID] = .keyConflict
+            peerConflictKeys[peerID] = incomingKey
+            effects.append(
+                .securityKeyConflictDetected(
+                    peerID: peerID,
+                    peerName: incoming.displayName.isEmpty ? existing.displayName : incoming.displayName,
+                    pinnedKeyBase64: existingKey,
+                    conflictingKeyBase64: incomingKey
+                )
+            )
+        } else if peerTrustStates[peerID] == nil {
+            peerTrustStates[peerID] = .unverifiedTOFU
+        }
+
+        let merged = NodeIdentity(
+            nodeID: peerID,
             displayName: incoming.displayName.isEmpty ? existing.displayName : incoming.displayName,
-            // TOFU (Trust On First Use): never overwrite an already-pinned public key
             publicKeyBase64: existingKey ?? incomingKey
         )
+        knownPeerIdentities[peerID] = merged
+        return (merged, effects)
     }
 
     private static func linkSortRank(_ kind: LinkKind) -> Int {
