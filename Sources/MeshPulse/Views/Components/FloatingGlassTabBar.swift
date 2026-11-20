@@ -11,6 +11,7 @@ public struct FloatingGlassTabBar: View {
     @Bindable public var coordinator: MeshCoordinator
     @Namespace private var tabAnimation
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     public init(coordinator: MeshCoordinator) {
         self.coordinator = coordinator
@@ -27,11 +28,22 @@ public struct FloatingGlassTabBar: View {
         .padding(.vertical, 4)
         .frame(maxWidth: .infinity)
         .frame(height: 64)
-        .background(.ultraThinMaterial)
+        .background {
+            if reduceTransparency {
+                Capsule()
+                    .fill(MeshTheme.cardSurface)
+            } else {
+                Capsule()
+                    .fill(.ultraThinMaterial)
+            }
+        }
         .clipShape(Capsule())
         .overlay {
             Capsule()
-                .stroke(Color.white.opacity(0.18), lineWidth: 0.5)
+                .stroke(
+                    reduceTransparency ? MeshTheme.strongBorder : Color.white.opacity(0.18),
+                    lineWidth: reduceTransparency ? 1.0 : 0.5
+                )
         }
         .shadow(color: Color.black.opacity(0.25), radius: 10, x: 0, y: 5)
         .padding(.horizontal, 20)
@@ -83,7 +95,7 @@ public struct FloatingGlassTabBar: View {
             }
             .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.applePressable(scaleDown: 0.96, pressedOpacity: 0.9))
         .sensoryFeedback(.selection, trigger: coordinator.selectedTab)
         .accessibilityLabel(tab.title)
         .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : [.isButton])

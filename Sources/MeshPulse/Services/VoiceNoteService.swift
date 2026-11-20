@@ -55,7 +55,7 @@ public final class VoiceNoteService: NSObject, AVAudioRecorderDelegate, AVAudioP
         #if os(iOS)
         let session = AVAudioSession.sharedInstance()
         do {
-            try session.setCategory(.playAndRecord, mode: .spokenAudio, options: [.defaultToSpeaker, .allowBluetooth])
+            try session.setCategory(.playAndRecord, mode: .spokenAudio, options: [.defaultToSpeaker, .allowBluetoothHFP])
             try session.setActive(true)
         } catch {
             print("[VoiceNoteService] Failed to activate audio session: \(error)")
@@ -137,14 +137,13 @@ public final class VoiceNoteService: NSObject, AVAudioRecorderDelegate, AVAudioP
                 try? FileManager.default.removeItem(at: url)
 
                 let finalTranscript = liveTranscription.trimmingCharacters(in: .whitespacesAndNewlines)
-                let resolvedTranscript = finalTranscript.isEmpty ? "Tin nhắn thoại (\(String(format: "%.1fs", finalDuration)))" : finalTranscript
+                let resolvedTranscript = finalTranscript
 
                 return VoiceNotePayload(
                     audioData: data,
                     durationSeconds: finalDuration,
-                    waveformSamples: finalWaveform,
-                    transcription: resolvedTranscript,
-                    format: "audio/aac-12k-mono"
+                    transcriptText: resolvedTranscript,
+                    waveformSamples: finalWaveform
                 )
             }
         }
@@ -155,9 +154,8 @@ public final class VoiceNoteService: NSObject, AVAudioRecorderDelegate, AVAudioP
         return VoiceNotePayload(
             audioData: mockData,
             durationSeconds: finalDuration,
-            waveformSamples: finalWaveform,
-            transcription: mockTranscript,
-            format: "audio/aac-12k-mono"
+            transcriptText: mockTranscript,
+            waveformSamples: finalWaveform
         )
     }
 
@@ -217,12 +215,12 @@ public final class VoiceNoteService: NSObject, AVAudioRecorderDelegate, AVAudioP
             self.playbackProgress = 0
             let duration = voiceNote.durationSeconds
             let start = Date()
-            playbackTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] timer in
+            playbackTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
                 Task { @MainActor [weak self] in
                     guard let self else { return }
                     let elapsed = Date().timeIntervalSince(start)
                     if elapsed >= duration {
-                        timer.invalidate()
+                        self.playbackTimer?.invalidate()
                         self.stopPlayback()
                     } else {
                         self.playbackProgress = elapsed / duration

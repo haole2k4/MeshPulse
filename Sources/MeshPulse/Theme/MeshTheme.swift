@@ -10,6 +10,8 @@ public enum MeshTheme {
     public static let background = Color.black
     /// Apple Native Grouped Card Surface `#1C1C1E`
     public static let cardSurface = Color(red: 0x1C / 255.0, green: 0x1C / 255.0, blue: 0x1E / 255.0)
+    /// Alias for `cardSurface`
+    public static let cardBackground = cardSurface
     /// Elevated / Interactive control surface `#2C2C2E`
     public static let elevatedSurface = Color(red: 0x2C / 255.0, green: 0x2C / 255.0, blue: 0x2E / 255.0)
     /// Single subtle separator
@@ -33,6 +35,8 @@ public enum MeshTheme {
     public static let dtnIndigo = Color(red: 0x63 / 255.0, green: 0x66 / 255.0, blue: 0xF1 / 255.0)
     /// Emergency SOS Signal & Disconnected Alert (Apple System Red `#FF453A`)
     public static let sosCrimson = Color(red: 0xFF / 255.0, green: 0x45 / 255.0, blue: 0x3A / 255.0)
+    /// Cyan Accent `#22D3EE`
+    public static let meshCyan = Color(red: 0x22 / 255.0, green: 0xD3 / 255.0, blue: 0xEE / 255.0)
 
     // MARK: - High-Contrast Typography Colors (WCAG AA >= 4.5:1)
 
@@ -158,11 +162,13 @@ public struct LinkStatusBadge: View {
             Text(labelText)
                 .font(.caption2.weight(.semibold))
                 .monospacedDigit()
+                .lineLimit(1)
         }
         .foregroundStyle(accent)
         .padding(.horizontal, 9)
         .padding(.vertical, 4.5)
         .background(accent.opacity(0.14), in: Capsule())
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     private var symbolName: String {
@@ -289,6 +295,7 @@ public struct PeerTrustBadge: View {
         .padding(.horizontal, compact ? 7 : 9)
         .padding(.vertical, compact ? 3 : 4.5)
         .background(accentColor.opacity(0.14), in: Capsule())
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     private var symbolName: String {
@@ -340,17 +347,20 @@ public struct GeoLocationLinkChip: View {
     public let coordinate: GeoCoordinate
     public let label: String
     public let tint: Color
+    public let isOnAccent: Bool
 
     @Environment(\.openURL) private var openURL
 
     public init(
         coordinate: GeoCoordinate,
         label: String,
-        tint: Color = MeshTheme.p2pGreen
+        tint: Color = MeshTheme.p2pGreen,
+        isOnAccent: Bool = false
     ) {
         self.coordinate = coordinate
         self.label = label
         self.tint = tint
+        self.isOnAccent = isOnAccent
     }
 
     public var body: some View {
@@ -362,27 +372,30 @@ public struct GeoLocationLinkChip: View {
             HStack(spacing: 8) {
                 Image(systemName: "location.fill")
                     .font(.caption.weight(.bold))
-                    .foregroundStyle(tint)
+                    .foregroundStyle(isOnAccent ? Color.white : tint)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(formattedCoords)
                         .font(.caption.monospaced().weight(.semibold))
-                        .foregroundStyle(MeshTheme.primaryText)
+                        .foregroundStyle(isOnAccent ? Color.white : MeshTheme.primaryText)
                     Text("Sai số ±\(Int(coordinate.accuracyMeters.rounded()))m · Mở Bản đồ")
                         .font(.caption2.monospacedDigit())
-                        .foregroundStyle(MeshTheme.secondaryText)
+                        .foregroundStyle(isOnAccent ? Color.white.opacity(0.88) : MeshTheme.secondaryText)
                 }
 
                 Spacer(minLength: 4)
 
                 Image(systemName: "arrow.up.right.square.fill")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(tint)
+                    .foregroundStyle(isOnAccent ? Color.white : tint)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .frame(minHeight: MeshTheme.minTapDimension)
-            .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(
+                isOnAccent ? Color.black.opacity(0.24) : tint.opacity(0.12),
+                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.applePressable)

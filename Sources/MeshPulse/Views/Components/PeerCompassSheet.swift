@@ -15,6 +15,7 @@ public struct PeerCompassSheet: View {
 
     @State private var simulatedHeading: Double = 0.0
     @State private var useSimulationSlider: Bool = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public init(
         localCoordinate: GeoCoordinate?,
@@ -58,30 +59,37 @@ public struct PeerCompassSheet: View {
         return normalizedDiff <= 15.0
     }
 
+    private var compassAccessibilityLabel: String {
+        guard let local = localCoordinate, let target = peerCoord else {
+            return "La bàn đang chờ tọa độ GPS từ \(peer.identity.displayName)"
+        }
+        let summary = ProximityMath.formattedProximitySummary(from: local, to: target)
+        let lockStatus = isLockedOn
+            ? "Đã khóa hướng, đang hướng thẳng về phía trạm"
+            : "Xoay máy theo mũi tên để định hướng"
+        return "\(peer.identity.displayName), khoảng cách \(summary). \(lockStatus)"
+    }
+
     public var body: some View {
         NavigationStack {
-            ZStack {
-                Color.black
-                    .ignoresSafeArea()
-
-                VStack(spacing: 24) {
+            ScrollView {
+                VStack(spacing: 20) {
                     // Header Card
                     VStack(spacing: 6) {
-                        Text(peer.displayName)
+                        Text(peer.identity.displayName)
                             .font(.title2.weight(.bold))
                             .foregroundStyle(MeshTheme.primaryText)
+                            .lineLimit(1)
                         HStack(spacing: 6) {
                             Circle()
-                                .fill(peer.isDirectNeighbor ? MeshTheme.emerald : MeshTheme.meshCyan)
+                                .fill(peer.linkKind == .directP2P ? MeshTheme.emerald : MeshTheme.meshCyan)
                                 .frame(width: 8, height: 8)
-                            Text(peer.isDirectNeighbor ? "Kết nối trực tiếp 1-Hop" : "\(peer.hopCount)-Hop qua mạng Mesh")
+                            Text(linkDescription)
                                 .font(.caption.weight(.medium))
                                 .foregroundStyle(MeshTheme.secondaryText)
                         }
                     }
-                    .padding(.top, 16)
-
-                    Spacer()
+                    .padding(.top, 12)
 
                     // Compass Radar Display
                     ZStack {
@@ -90,7 +98,10 @@ public struct PeerCompassSheet: View {
                             .fill(isLockedOn ? MeshTheme.emerald.opacity(0.18) : Color.white.opacity(0.03))
                             .frame(width: 280, height: 280)
                             .blur(radius: isLockedOn ? 24 : 0)
-                            .animation(.easeInOut(duration: 0.3), value: isLockedOn)
+                            .animation(
+                                reduceMotion ? .easeOut(duration: 0.16) : .easeInOut(duration: 0.3),
+                                value: isLockedOn
+                            )
 
                         // Outer Dial Ring
                         Circle()
@@ -125,7 +136,10 @@ public struct PeerCompassSheet: View {
                                     .frame(height: 70)
                             }
                             .rotationEffect(.degrees(relativeArrowAngle))
-                            .animation(.spring(response: 0.35, dampingFraction: 0.7), value: relativeArrowAngle)
+                            .animation(
+                                reduceMotion ? .easeOut(duration: 0.16) : .spring(response: 0.35, dampingFraction: 0.7),
+                                value: relativeArrowAngle
+                            )
                         } else {
                             VStack(spacing: 8) {
                                 Image(systemName: "location.slash")
@@ -143,11 +157,13 @@ public struct PeerCompassSheet: View {
                             .frame(width: 14, height: 14)
                     }
                     .frame(height: 280)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(compassAccessibilityLabel)
 
                     // Precision Metrics
-                    if let dist = distanceMeters, let bearing = targetBearing {
+                    if let local = localCoordinate, let target = peerCoord {
                         VStack(spacing: 8) {
-                            Text(ProximityMath.formattedProximitySummary(distanceMeters: dist, bearingDegrees: bearing))
+                            Text(ProximityMath.formattedProximitySummary(from: local, to: target))
                                 .font(.system(size: 26, weight: .heavy, design: .rounded))
                                 .foregroundStyle(isLockedOn ? MeshTheme.emerald : MeshTheme.primaryText)
 
@@ -158,13 +174,15 @@ public struct PeerCompassSheet: View {
                                 }
                                 .font(.footnote.weight(.semibold))
                                 .foregroundStyle(MeshTheme.emerald)
-                                .transition(.opacity.combined(with: .scale))
+                                .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale))
                             } else {
                                 Text("Xoay máy theo mũi tên để định hướng")
                                     .font(.footnote)
                                     .foregroundStyle(MeshTheme.secondaryText)
                             }
                         }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(compassAccessibilityLabel)
                     } else {
                         VStack(spacing: 4) {
                             Text("Đang chờ tọa độ từ trạm...")
@@ -173,13 +191,13 @@ public struct PeerCompassSheet: View {
                             Text("Tọa độ GPS sẽ tự động cập nhật qua gói Heartbeat")
                                 .font(.caption2)
                                 .foregroundStyle(MeshTheme.secondaryText.opacity(0.7))
+                                .multilineTextAlignment(.center)
                         }
+                        .padding(.horizontal, 24)
                     }
 
-                    Spacer()
-
                     // Telemetry & Altitude / Speed Footer
-                    HStack(spacing: 20) {
+                    HStack(spacing: 12) {
                         telemetryPill(
                             title: "GÓC PHƯƠNG VỊ",
                             value: targetBearing != nil ? String(format: "%.0f°", targetBearing!) : "--"
@@ -195,13 +213,14 @@ public struct PeerCompassSheet: View {
                             )
                         }
                     }
-                    .padding(.horizontal, 24)
+                    .padding(.horizontal, 20)
 
                     // Mock Simulation Slider (for devices without magnetometer or Linux/Simulator testing)
-                    VStack(spacing: 6) {
+                    VStack(spacing: 8) {
                         Toggle("Mô phỏng Xoay La bàn (Test)", isOn: $useSimulationSlider)
                             .font(.caption)
                             .foregroundStyle(MeshTheme.secondaryText)
+                            .tint(MeshTheme.emerald)
 
                         if useSimulationSlider {
                             HStack {
@@ -218,24 +237,41 @@ public struct PeerCompassSheet: View {
                             }
                         }
                     }
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 16)
+                    .padding(14)
+                    .background(MeshTheme.cardSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .padding(.horizontal, 20)
                 }
+                .padding(.bottom, 28)
             }
+            .scrollIndicators(.hidden)
+            .background(MeshTheme.background)
             .navigationTitle("La Bàn Dò Vị Trí Trạm")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Đóng") {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Xong") {
                         dismiss()
                     }
+                    .fontWeight(.semibold)
                     .foregroundStyle(MeshTheme.emerald)
                 }
             }
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+        .presentationBackground(MeshTheme.background)
         .sensoryFeedback(.impact(weight: .light), trigger: isLockedOn)
+    }
+
+    private var linkDescription: String {
+        switch peer.linkKind {
+        case .directP2P:
+            "Kết nối trực tiếp 1-Hop"
+        case let .relayedMesh(_, _, hops):
+            "\(hops)-Hop qua mạng Mesh"
+        case .offlineDTN:
+            "Ngoại tuyến (DTN)"
+        }
     }
 
     private func telemetryPill(title: String, value: String) -> some View {
@@ -248,8 +284,8 @@ public struct PeerCompassSheet: View {
                 .foregroundStyle(MeshTheme.primaryText)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+        .padding(.vertical, 10)
+        .background(MeshTheme.cardSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 #endif

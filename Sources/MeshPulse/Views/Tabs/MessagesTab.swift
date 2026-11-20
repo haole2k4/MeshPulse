@@ -418,10 +418,18 @@ public struct VoiceNoteBubble: View {
         voiceService.playingID == itemID ? voiceService.playbackProgress : 0.0
     }
 
+    private var trimmedTranscript: String {
+        voiceNote.transcriptText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var showTranscript: Bool {
+        !trimmedTranscript.isEmpty && !trimmedTranscript.hasPrefix("Tin nhắn thoại (")
+    }
+
     public var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                // Play / Pause Circle
+                // Play / Pause Circle (36x36pt)
                 Button {
                     voiceService.play(voiceNote: voiceNote, itemID: itemID)
                 } label: {
@@ -432,62 +440,62 @@ public struct VoiceNoteBubble: View {
 
                         Image(systemName: isThisPlaying ? "pause.fill" : "play.fill")
                             .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(isOutgoing ? MeshTheme.emerald : Color.black)
+                            .foregroundStyle(isOutgoing ? MeshTheme.emeraldDark : Color.white)
                             .offset(x: isThisPlaying ? 0 : 1)
                     }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.applePressable)
 
-                // 24 Waveform Bars
+                // Symmetric Capsule Waveform Bars
                 HStack(alignment: .center, spacing: 2.5) {
                     let samples = voiceNote.waveformSamples.isEmpty
                         ? Array(repeating: Float(0.3), count: 24)
                         : voiceNote.waveformSamples
 
                     ForEach(samples.indices, id: \.self) { idx in
-                        let normalizedProgress = Double(idx) / Double(samples.count)
+                        let normalizedProgress = Double(idx) / Double(max(1, samples.count))
                         let isPlayed = normalizedProgress <= currentProgress
-                        let sampleHeight = CGFloat(max(0.18, min(1.0, samples[idx]))) * 26.0
+                        let sampleHeight = max(4, CGFloat(max(0.16, min(1.0, samples[idx]))) * 24.0)
 
-                        RoundedRectangle(cornerRadius: 1.5)
+                        Capsule()
                             .fill(
                                 isOutgoing
-                                    ? (isPlayed ? Color.white : Color.white.opacity(0.35))
-                                    : (isPlayed ? MeshTheme.emerald : Color.white.opacity(0.2))
+                                    ? (isPlayed ? Color.white : Color.white.opacity(0.42))
+                                    : (isPlayed ? MeshTheme.emerald : Color.white.opacity(0.24))
                             )
-                            .frame(width: 3, height: sampleHeight)
+                            .frame(width: 2.5, height: sampleHeight)
                     }
                 }
-                .frame(height: 32)
+                .frame(height: 28)
 
                 // Duration Text
-                Text(String(format: "0:%02d", Int(round(voiceNote.durationSeconds))))
-                    .font(.caption2.monospacedDigit().weight(.semibold))
-                    .foregroundStyle(isOutgoing ? Color.white.opacity(0.9) : MeshTheme.secondaryText)
+                Text(formatVoiceDuration(voiceNote.durationSeconds))
+                    .font(.caption.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(isOutgoing ? Color.white.opacity(0.95) : MeshTheme.primaryText)
             }
 
-            // On-Device AI Speech Transcript
-            if !voiceNote.transcription.isEmpty {
-                HStack(alignment: .top, spacing: 4) {
+            // On-Device AI Speech Transcript (hidden if empty or synthetic placeholder)
+            if showTranscript {
+                HStack(alignment: .top, spacing: 5) {
                     Image(systemName: "waveform.and.mic")
-                        .font(.system(size: 9))
-                        .foregroundStyle(isOutgoing ? Color.white.opacity(0.7) : MeshTheme.emerald)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(isOutgoing ? Color.white.opacity(0.8) : MeshTheme.emerald)
                         .padding(.top, 2)
 
-                    Text(voiceNote.transcription)
+                    Text(trimmedTranscript)
                         .font(.footnote)
                         .italic()
                         .foregroundStyle(isOutgoing ? Color.white : MeshTheme.primaryText)
                         .lineLimit(3)
                 }
-                .padding(.top, 2)
+                .padding(.horizontal, 4)
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.vertical, 9)
         .background(
-            isOutgoing ? MeshTheme.emerald : MeshTheme.cardSurface,
-            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+            isOutgoing ? MeshTheme.emeraldDark : MeshTheme.cardSurface,
+            in: RoundedRectangle(cornerRadius: showTranscript ? 18 : 26, style: .continuous)
         )
     }
 }
@@ -544,7 +552,7 @@ public struct MediaImageBubble: View {
         }
         .padding(6)
         .background(
-            isOutgoing ? MeshTheme.emerald : MeshTheme.cardSurface,
+            isOutgoing ? MeshTheme.emeraldDark : MeshTheme.cardSurface,
             in: RoundedRectangle(cornerRadius: 18, style: .continuous)
         )
     }
@@ -567,6 +575,97 @@ public struct MediaImageBubble: View {
     }
 }
 
+@MainActor
+private func dismissKeyboard() {
+    #if canImport(UIKit)
+    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    #endif
+}
+
+private func formatVoiceDuration(_ seconds: TimeInterval, roundToNearest: Bool = true) -> String {
+    let total = max(0, roundToNearest ? Int(round(seconds)) : Int(seconds))
+    return String(format: "%d:%02d", total / 60, total % 60)
+}
+
+private struct MessageTelemetryFooter: View {
+    let item: ChatThreadItem
+    let isLastOutgoing: Bool
+    let isExpanded: Bool
+
+    var body: some View {
+        if isExpanded {
+            HopPathBadge(
+                routeNames: item.routeNames,
+                hopCount: item.hopCount,
+                deliveryState: item.isOutgoing ? item.deliveryState : nil,
+                rttMs: item.rttMs
+            )
+            .padding(.horizontal, 4)
+            .transition(.opacity.combined(with: .move(edge: .top)))
+        } else if item.isOutgoing {
+            if isLastOutgoing || item.deliveryState == .queuedDTN || item.deliveryState == .relayed {
+                outgoingCompactStatus
+                    .padding(.horizontal, 4)
+            }
+        } else if item.hopCount > 1 {
+            HStack(spacing: 4) {
+                Image(systemName: "point.3.connected.trianglepath.dotted")
+                    .font(.system(size: 9, weight: .semibold))
+                Text("\(item.hopCount)H · qua \(relayViaName)")
+                    .font(.system(size: 10, weight: .medium))
+            }
+            .foregroundStyle(MeshTheme.secondaryText)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(MeshTheme.cardSurface, in: Capsule())
+            .padding(.horizontal, 4)
+        }
+    }
+
+    @ViewBuilder
+    private var outgoingCompactStatus: some View {
+        switch item.deliveryState {
+        case .sentDirect:
+            Text("✓ Đã gửi")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(MeshTheme.secondaryText)
+        case .deliveredAck:
+            Text("✓✓ Đã nhận")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(MeshTheme.emerald)
+        case .relayed:
+            HStack(spacing: 3) {
+                Image(systemName: "point.3.connected.trianglepath.dotted")
+                    .font(.system(size: 9, weight: .semibold))
+                Text("\(item.hopCount)H Bắc cầu")
+                    .font(.system(size: 10, weight: .medium))
+            }
+            .foregroundStyle(MeshTheme.meshAmber)
+        case .queuedDTN:
+            HStack(spacing: 3) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 9, weight: .semibold))
+                Text("DTN Chờ gửi")
+                    .font(.system(size: 10, weight: .medium))
+            }
+            .foregroundStyle(MeshTheme.dtnIndigo)
+        }
+    }
+
+    private var relayViaName: String {
+        if item.routeNames.count >= 3 {
+            return item.routeNames[item.routeNames.count - 2]
+        }
+        if item.routeNames.count == 2, item.routeNames[0] != item.senderName {
+            return item.routeNames[0]
+        }
+        if let other = item.routeNames.first(where: { $0 != item.senderName }) {
+            return other
+        }
+        return "Mesh"
+    }
+}
+
 public struct SmartComposerBar: View {
     public let isBroadcast: Bool
     public let recipientName: String?
@@ -576,14 +675,23 @@ public struct SmartComposerBar: View {
     public let onTriggerRollCall: (() -> Void)?
     public let onTriggerPoll: (() -> Void)?
 
+    private let externalFocus: FocusState<Bool>.Binding?
+    @FocusState private var internalFocus: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var draftText: String = ""
     @State private var includeGPS: Bool = false
     @State private var isRecording: Bool = false
+    @State private var isRecordingPulse: Bool = false
     private var voiceService: VoiceNoteService { VoiceNoteService.shared }
+
+    private var textFieldFocus: FocusState<Bool>.Binding {
+        externalFocus ?? $internalFocus
+    }
 
     public init(
         isBroadcast: Bool,
         recipientName: String? = nil,
+        isFocused: FocusState<Bool>.Binding? = nil,
         onSendText: @escaping (String, Bool) -> Void,
         onSendVoice: @escaping (VoiceNotePayload) -> Void,
         onSendMedia: @escaping (Data, String) -> Void,
@@ -592,6 +700,7 @@ public struct SmartComposerBar: View {
     ) {
         self.isBroadcast = isBroadcast
         self.recipientName = recipientName
+        self.externalFocus = isFocused
         self.onSendText = onSendText
         self.onSendVoice = onSendVoice
         self.onSendMedia = onSendMedia
@@ -600,69 +709,133 @@ public struct SmartComposerBar: View {
     }
 
     public var body: some View {
-        VStack(spacing: 6) {
-            // Live voice recording banner
+        VStack(spacing: 0) {
+            Divider()
+                .overlay(MeshTheme.hairlineBorder)
+
             if isRecording {
-                HStack(spacing: 12) {
-                    Circle()
-                        .fill(MeshTheme.sosCrimson)
-                        .frame(width: 10, height: 10)
+                recordingComposerView
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            } else {
+                standardComposerView
+            }
+        }
+        .background(MeshTheme.background)
+    }
 
-                    Text(String(format: "0:%02d", Int(voiceService.recordingDuration)))
-                        .font(.subheadline.monospacedDigit().weight(.bold))
-                        .foregroundStyle(MeshTheme.sosCrimson)
+    private var recordingComposerView: some View {
+        VStack(spacing: 4) {
+            let transcript = voiceService.liveTranscription.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !transcript.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: "waveform.and.mic")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(MeshTheme.emerald)
 
-                    // Live Waveform Mini
-                    HStack(spacing: 2) {
-                        ForEach(Array(voiceService.liveWaveform.suffix(16).enumerated()), id: \.offset) { _, val in
-                            RoundedRectangle(cornerRadius: 1)
-                                .fill(MeshTheme.sosCrimson.opacity(0.85))
-                                .frame(width: 2.5, height: CGFloat(max(0.2, val)) * 16)
-                        }
-                    }
-                    .frame(height: 18)
+                    Text(transcript)
+                        .font(.caption)
+                        .italic()
+                        .foregroundStyle(MeshTheme.secondaryText)
+                        .lineLimit(1)
 
-                    if !voiceService.liveTranscription.isEmpty {
-                        Text(voiceService.liveTranscription)
-                            .font(.caption2)
-                            .italic()
-                            .foregroundStyle(MeshTheme.primaryText)
-                            .lineLimit(1)
-                    }
-
-                    Spacer()
-
-                    // Cancel
-                    Button {
-                        voiceService.cancelRecording()
-                        isRecording = false
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 20))
-                            .foregroundStyle(MeshTheme.secondaryText)
-                    }
-
-                    // Stop & Send
-                    Button {
-                        Task {
-                            if let payload = await voiceService.stopRecording() {
-                                onSendVoice(payload)
-                            }
-                            isRecording = false
-                        }
-                    } label: {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 24, weight: .bold))
-                            .foregroundStyle(MeshTheme.emerald)
-                    }
+                    Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(MeshTheme.cardBackground, in: RoundedRectangle(cornerRadius: 14))
-                .padding(.horizontal, 12)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
             }
 
+            HStack(spacing: 6) {
+                // Left: Trash cancel button (36x36pt visual, 44x44pt hit target)
+                Button {
+                    voiceService.cancelRecording()
+                    isRecording = false
+                } label: {
+                    Image(systemName: "trash.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(MeshTheme.sosCrimson)
+                        .frame(width: 36, height: 36)
+                        .background(MeshTheme.elevatedSurface, in: Circle())
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.applePressable)
+                .accessibilityLabel("Hủy ghi âm")
+
+                // Center: Recording Capsule (44pt height)
+                HStack(spacing: 8) {
+                    ZStack {
+                        Circle()
+                            .fill(MeshTheme.sosCrimson.opacity(0.22))
+                            .frame(width: 28, height: 28)
+
+                        Image(systemName: "stop.fill")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(MeshTheme.sosCrimson)
+                    }
+                    .opacity(isRecordingPulse ? 0.55 : 1.0)
+
+                    // 28 symmetric Capsule waveform bars
+                    HStack(alignment: .center, spacing: 2) {
+                        let bars = resampledWaveform(voiceService.liveWaveform, count: 28)
+                        ForEach(bars.indices, id: \.self) { idx in
+                            let barHeight = max(4, CGFloat(max(0.14, min(1.0, bars[idx]))) * 24)
+                            Capsule()
+                                .fill(MeshTheme.emeraldLight)
+                                .frame(width: 2.5, height: barHeight)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 28, maxHeight: 28)
+
+                    Text(formatVoiceDuration(voiceService.recordingDuration, roundToNearest: false))
+                        .font(.caption.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(MeshTheme.primaryText)
+                }
+                .padding(.horizontal, 10)
+                .frame(height: 44)
+                .background(MeshTheme.emerald.opacity(0.22), in: Capsule())
+                .overlay {
+                    Capsule()
+                        .stroke(MeshTheme.emerald.opacity(0.45), lineWidth: 1)
+                }
+
+                // Right: Send paperplane button (36x36pt visual, 44x44pt hit target)
+                Button {
+                    Task {
+                        if let payload = await voiceService.stopRecording() {
+                            onSendVoice(payload)
+                        }
+                        isRecording = false
+                    }
+                } label: {
+                    Image(systemName: "paperplane.fill")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(Color.white)
+                        .frame(width: 36, height: 36)
+                        .background(MeshTheme.emerald, in: Circle())
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.applePressable)
+                .accessibilityLabel("Gửi tin nhắn thoại")
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .onAppear {
+                if !reduceMotion {
+                    isRecordingPulse = false
+                    withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) {
+                        isRecordingPulse = true
+                    }
+                }
+            }
+            .onDisappear {
+                isRecordingPulse = false
+            }
+        }
+    }
+
+    private var standardComposerView: some View {
+        VStack(spacing: 4) {
             // GPS indicator chip
             if includeGPS {
                 HStack(spacing: 5) {
@@ -677,14 +850,16 @@ public struct SmartComposerBar: View {
                         Image(systemName: "xmark")
                             .font(.system(size: 10, weight: .bold))
                     }
+                    .buttonStyle(.applePressable)
                 }
                 .foregroundStyle(MeshTheme.emerald)
                 .padding(.horizontal, 14)
+                .padding(.top, 6)
             }
 
-            // Main input row
-            HStack(alignment: .center, spacing: 10) {
-                // [+] Action Menu
+            // Main input row (Apple Messages iOS Dark Mode)
+            HStack(alignment: .bottom, spacing: 6) {
+                // [+] Action Menu (36x36pt visual, 44x44pt hit target)
                 Menu {
                     Button {
                         includeGPS.toggle()
@@ -712,26 +887,41 @@ public struct SmartComposerBar: View {
                         Label("Gửi Ảnh Nén Mesh (16KB/chunk)", systemImage: "photo.fill")
                     }
                 } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 26, weight: .semibold))
-                        .foregroundStyle(includeGPS ? MeshTheme.emerald : MeshTheme.secondaryText)
+                    Image(systemName: "plus")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(includeGPS ? MeshTheme.emerald : MeshTheme.primaryText)
+                        .frame(width: 36, height: 36)
+                        .background(MeshTheme.elevatedSurface, in: Circle())
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.applePressable)
+                .accessibilityLabel("Tùy chọn đính kèm")
 
-                // Text field
+                // Capsule-style TextField
                 TextField(
                     isBroadcast ? "Gửi tin nhắn tới toàn mạng..." : "Nhắn mã hóa tới \(recipientName ?? "trạm")...",
                     text: $draftText,
                     axis: .vertical
                 )
+                .focused(textFieldFocus)
                 .lineLimit(1...4)
                 .font(.body)
                 .foregroundStyle(MeshTheme.primaryText)
                 .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .frame(minHeight: 38)
-                .background(MeshTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 19, style: .continuous))
+                .padding(.vertical, 7)
+                .frame(minHeight: 36)
+                .background(
+                    MeshTheme.cardSurface,
+                    in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(MeshTheme.strongBorder, lineWidth: 0.75)
+                }
+                .padding(.vertical, 4)
 
-                // Dynamic Action Button (Mic vs Send)
+                // Dynamic Action Button (Send vs Mic, 36x36pt visual, 44x44pt hit target)
                 if canSendText {
                     Button {
                         let text = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -740,39 +930,52 @@ public struct SmartComposerBar: View {
                         draftText = ""
                         includeGPS = false
                     } label: {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 30, weight: .bold))
-                            .foregroundStyle(MeshTheme.emerald)
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(Color.white)
+                            .frame(width: 36, height: 36)
+                            .background(MeshTheme.emerald, in: Circle())
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.applePressable)
                     .transition(.scale.combined(with: .opacity))
+                    .accessibilityLabel("Gửi tin nhắn")
                 } else {
-                    // Push to talk button
                     Button {
-                        if !isRecording {
-                            Task {
-                                isRecording = await voiceService.startRecording()
-                            }
-                        } else {
-                            Task {
-                                if let payload = await voiceService.stopRecording() {
-                                    onSendVoice(payload)
-                                }
-                                isRecording = false
-                            }
+                        textFieldFocus.wrappedValue = false
+                        dismissKeyboard()
+                        Task {
+                            isRecording = await voiceService.startRecording()
                         }
                     } label: {
-                        Image(systemName: isRecording ? "stop.circle.fill" : "mic.circle.fill")
-                            .font(.system(size: 30, weight: .bold))
-                            .foregroundStyle(isRecording ? MeshTheme.sosCrimson : MeshTheme.secondaryText)
+                        Image(systemName: "mic.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(MeshTheme.primaryText)
+                            .frame(width: 36, height: 36)
+                            .background(MeshTheme.elevatedSurface, in: Circle())
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.applePressable)
                     .transition(.scale.combined(with: .opacity))
+                    .accessibilityLabel("Ghi âm tin nhắn thoại")
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(.ultraThinMaterial)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+        }
+    }
+
+    private func resampledWaveform(_ raw: [Float], count: Int) -> [Float] {
+        guard !raw.isEmpty else { return Array(repeating: 0.18, count: count) }
+        guard raw.count != count else { return raw }
+        return (0..<count).map { idx in
+            let pos = Double(idx) / Double(max(1, count - 1)) * Double(raw.count - 1)
+            let lo = Int(pos)
+            let hi = min(raw.count - 1, lo + 1)
+            let frac = Float(pos - Double(lo))
+            return raw[lo] * (1 - frac) + raw[hi] * frac
         }
     }
 
@@ -897,6 +1100,8 @@ public struct BroadcastChatRoomView: View {
     public var navigationPath: Binding<[MessagesTab.ChatDestination]>?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @FocusState private var isComposerFocused: Bool
+    @State private var expandedTelemetryID: UUID?
     @State private var sendFeedbackCount = 0
     @State private var isShowingCreateRollCall = false
     @State private var isShowingCreatePoll = false
@@ -933,18 +1138,29 @@ public struct BroadcastChatRoomView: View {
             // Message stream
             ScrollViewReader { proxy in
                 ScrollView {
-                    if coordinator.broadcastMessages.isEmpty {
+                    let messages = coordinator.broadcastMessages
+                    let lastOutgoingID = messages.last(where: { $0.isOutgoing })?.id
+
+                    if messages.isEmpty {
                         emptyBroadcastState
                             .padding(.top, 40)
                             .padding(.horizontal, 20)
                     } else {
-                        LazyVStack(spacing: 14) {
-                            ForEach(coordinator.broadcastMessages) { item in
+                        LazyVStack(spacing: 8) {
+                            ForEach(Array(messages.enumerated()), id: \.element.id) { idx, item in
+                                let previous = idx > 0 ? messages[idx - 1] : nil
+                                let showHeader = previous == nil
+                                    || item.timestamp.timeIntervalSince(previous!.timestamp) > 120
+                                    || item.senderID != previous!.senderID
+                                let isLastOutgoing = item.id == lastOutgoingID
+
                                 if item.isSOS {
-                                    sosBroadcastCard(item)
+                                    sosBroadcastCard(item, showTimestamp: showHeader, isLastOutgoing: isLastOutgoing)
+                                        .padding(.top, showHeader && idx > 0 ? 6 : 0)
                                         .id(item.id)
                                 } else {
-                                    broadcastMessageRow(item)
+                                    broadcastMessageRow(item, showHeader: showHeader, isLastOutgoing: isLastOutgoing)
+                                        .padding(.top, showHeader && idx > 0 ? 6 : 0)
                                         .id(item.id)
                                 }
                             }
@@ -953,6 +1169,11 @@ public struct BroadcastChatRoomView: View {
                         .padding(.top, 12)
                         .padding(.bottom, 16)
                     }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    isComposerFocused = false
+                    dismissKeyboard()
                 }
                 .scrollDismissesKeyboard(.interactively)
                 .onAppear {
@@ -967,6 +1188,7 @@ public struct BroadcastChatRoomView: View {
             SmartComposerBar(
                 isBroadcast: true,
                 recipientName: nil,
+                isFocused: $isComposerFocused,
                 onSendText: { text, gps in
                     sendFeedbackCount += 1
                     coordinator.sendBroadcast(text: text, includeLocation: gps)
@@ -1062,61 +1284,75 @@ public struct BroadcastChatRoomView: View {
         .background(MeshTheme.cardSurface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
-    private func broadcastMessageRow(_ item: ChatThreadItem) -> some View {
+    private func broadcastMessageRow(_ item: ChatThreadItem, showHeader: Bool, isLastOutgoing: Bool) -> some View {
         VStack(alignment: item.isOutgoing ? .trailing : .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                if item.isOutgoing {
-                    Text("Bạn (\(item.senderName))")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(MeshTheme.emerald)
-                } else {
-                    Text(item.senderName)
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(MeshTheme.primaryText)
-                }
+            if showHeader {
+                HStack(spacing: 6) {
+                    if item.isOutgoing {
+                        Text("Bạn (\(item.senderName))")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(MeshTheme.emerald)
+                    } else {
+                        Text(item.senderName)
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(MeshTheme.primaryText)
+                    }
 
-                Text(item.timestamp, format: .dateTime.hour().minute())
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(MeshTheme.secondaryText)
+                    Text(item.timestamp, format: .dateTime.hour().minute())
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(MeshTheme.secondaryText)
+                }
+                .padding(.horizontal, 4)
             }
-            .padding(.horizontal, 4)
 
             // Dynamic Bubble (Voice / Media Image / Text)
-            if let vn = item.voiceNote {
-                VoiceNoteBubble(voiceNote: vn, itemID: item.id, isOutgoing: item.isOutgoing)
-            } else if item.mediaData != nil || item.mediaTransferID != nil {
-                MediaImageBubble(item: item, isOutgoing: item.isOutgoing)
-            } else {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(item.text)
-                        .font(.body)
-                        .foregroundStyle(item.isOutgoing ? Color.white : MeshTheme.primaryText)
+            Group {
+                if let vn = item.voiceNote {
+                    VoiceNoteBubble(voiceNote: vn, itemID: item.id, isOutgoing: item.isOutgoing)
+                } else if item.mediaData != nil || item.mediaTransferID != nil {
+                    MediaImageBubble(item: item, isOutgoing: item.isOutgoing)
+                } else {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(item.text)
+                            .font(.body)
+                            .foregroundStyle(item.isOutgoing ? Color.white : MeshTheme.primaryText)
 
-                    if let coord = item.coordinate {
-                        GeoLocationLinkChip(coordinate: coord, label: "Tọa độ từ \(item.senderName)")
+                        if let coord = item.coordinate {
+                            GeoLocationLinkChip(
+                                coordinate: coord,
+                                label: "Tọa độ từ \(item.senderName)",
+                                isOnAccent: item.isOutgoing
+                            )
+                        }
                     }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(
+                        item.isOutgoing ? MeshTheme.emeraldDark : MeshTheme.cardSurface,
+                        in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    )
+                    .frame(maxWidth: 320, alignment: item.isOutgoing ? .trailing : .leading)
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(
-                    item.isOutgoing ? MeshTheme.emerald : MeshTheme.cardSurface,
-                    in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-                )
-                .frame(maxWidth: 320, alignment: item.isOutgoing ? .trailing : .leading)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(MeshTheme.animation(reduceMotion: reduceMotion)) {
+                    expandedTelemetryID = (expandedTelemetryID == item.id) ? nil : item.id
+                }
+                isComposerFocused = false
+                dismissKeyboard()
             }
 
-            HopPathBadge(
-                routeNames: item.routeNames,
-                hopCount: item.hopCount,
-                deliveryState: item.isOutgoing ? item.deliveryState : nil,
-                rttMs: item.rttMs
+            MessageTelemetryFooter(
+                item: item,
+                isLastOutgoing: isLastOutgoing,
+                isExpanded: expandedTelemetryID == item.id
             )
-            .padding(.horizontal, 4)
         }
         .frame(maxWidth: .infinity, alignment: item.isOutgoing ? .trailing : .leading)
     }
 
-    private func sosBroadcastCard(_ item: ChatThreadItem) -> some View {
+    private func sosBroadcastCard(_ item: ChatThreadItem, showTimestamp: Bool, isLastOutgoing: Bool) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: "light.beacon.max.fill")
@@ -1129,9 +1365,11 @@ public struct BroadcastChatRoomView: View {
 
                 Spacer()
 
-                Text(item.timestamp, format: .dateTime.hour().minute())
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(MeshTheme.secondaryText)
+                if showTimestamp {
+                    Text(item.timestamp, format: .dateTime.hour().minute())
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(MeshTheme.secondaryText)
+                }
             }
 
             Text(item.text)
@@ -1142,11 +1380,10 @@ public struct BroadcastChatRoomView: View {
                 GeoLocationLinkChip(coordinate: coord, label: "Tọa độ cầu cứu")
             }
 
-            HopPathBadge(
-                routeNames: item.routeNames,
-                hopCount: item.hopCount,
-                deliveryState: item.deliveryState,
-                rttMs: item.rttMs
+            MessageTelemetryFooter(
+                item: item,
+                isLastOutgoing: isLastOutgoing,
+                isExpanded: expandedTelemetryID == item.id
             )
         }
         .padding(14)
@@ -1154,6 +1391,14 @@ public struct BroadcastChatRoomView: View {
         .overlay {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(MeshTheme.sosCrimson.opacity(0.4), lineWidth: 1)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            withAnimation(MeshTheme.animation(reduceMotion: reduceMotion)) {
+                expandedTelemetryID = (expandedTelemetryID == item.id) ? nil : item.id
+            }
+            isComposerFocused = false
+            dismissKeyboard()
         }
     }
 
@@ -1297,6 +1542,8 @@ public struct DirectPeerChatRoomView: View {
     public var navigationPath: Binding<[MessagesTab.ChatDestination]>?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @FocusState private var isComposerFocused: Bool
+    @State private var expandedTelemetryID: UUID?
     @State private var isShowingFingerprintSheet = false
     @State private var isShowingCompassSheet = false
     @State private var isShowingQRSheet = false
@@ -1324,6 +1571,17 @@ public struct DirectPeerChatRoomView: View {
             return "\(hops)-Hop qua \(viaName)"
         case .offlineDTN:
             return "Ngoại tuyến DTN"
+        }
+    }
+
+    private var trustIndicator: (symbol: String, text: String, color: Color) {
+        switch peer.trustState {
+        case .unverifiedTOFU:
+            return ("lock.fill", "E2EE", MeshTheme.secondaryText)
+        case .verifiedOutOfBand:
+            return ("checkmark.shield.fill", "Đã xác thực", MeshTheme.emerald)
+        case .keyConflict:
+            return ("exclamationmark.triangle.fill", "Khóa bất thường", MeshTheme.meshAmber)
         }
     }
 
@@ -1361,14 +1619,22 @@ public struct DirectPeerChatRoomView: View {
             // Message Stream
             ScrollViewReader { proxy in
                 ScrollView {
+                    let lastOutgoingID = messages.last(where: { $0.isOutgoing })?.id
+
                     if messages.isEmpty {
                         emptyRoomState
                             .padding(.top, 40)
                             .padding(.horizontal, 20)
                     } else {
-                        LazyVStack(spacing: 14) {
-                            ForEach(messages) { item in
-                                directBubbleRow(item)
+                        LazyVStack(spacing: 8) {
+                            ForEach(Array(messages.enumerated()), id: \.element.id) { idx, item in
+                                let previous = idx > 0 ? messages[idx - 1] : nil
+                                let showTimestamp = previous == nil
+                                    || item.timestamp.timeIntervalSince(previous!.timestamp) > 120
+                                let isLastOutgoing = item.id == lastOutgoingID
+
+                                directBubbleRow(item, showTimestamp: showTimestamp, isLastOutgoing: isLastOutgoing)
+                                    .padding(.top, showTimestamp && idx > 0 ? 6 : 0)
                                     .id(item.id)
                             }
                         }
@@ -1376,6 +1642,11 @@ public struct DirectPeerChatRoomView: View {
                         .padding(.top, 12)
                         .padding(.bottom, 12)
                     }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    isComposerFocused = false
+                    dismissKeyboard()
                 }
                 .scrollDismissesKeyboard(.interactively)
                 .onAppear {
@@ -1390,6 +1661,7 @@ public struct DirectPeerChatRoomView: View {
             SmartComposerBar(
                 isBroadcast: false,
                 recipientName: peer.identity.displayName,
+                isFocused: $isComposerFocused,
                 onSendText: { text, gps in
                     sendFeedbackCount += 1
                     coordinator.sendDirectMessage(to: peerID, text: text, includeLocation: gps)
@@ -1412,38 +1684,51 @@ public struct DirectPeerChatRoomView: View {
         #endif
         .toolbar {
             ToolbarItem(placement: .principal) {
-                HStack(spacing: 6) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(peer.identity.displayName)
-                            .font(.headline)
-                            .foregroundStyle(MeshTheme.primaryText)
-                        Text("\(routeSummaryText) • E2EE")
+                let trust = trustIndicator
+                VStack(alignment: .center, spacing: 1) {
+                    Text(peer.identity.displayName)
+                        .font(.headline)
+                        .foregroundStyle(MeshTheme.primaryText)
+                        .lineLimit(1)
+
+                    HStack(spacing: 4) {
+                        Image(systemName: trust.symbol)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(trust.color)
+
+                        Text("\(routeSummaryText) · \(trust.text)")
                             .font(.caption2)
                             .foregroundStyle(MeshTheme.secondaryText)
+                            .lineLimit(1)
                     }
-                    PeerTrustBadge(trustState: peer.trustState, compact: true)
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 10) {
+                HStack(spacing: 4) {
                     Button {
                         coordinator.startHeadingUpdates()
                         isShowingCompassSheet = true
                     } label: {
                         Image(systemName: "location.north.circle.fill")
-                            .font(.system(size: 18))
+                            .font(.system(size: 18, weight: .semibold))
                             .foregroundStyle(MeshTheme.emerald)
+                            .frame(minWidth: 36, minHeight: 36)
+                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.applePressable)
+                    .accessibilityLabel("La bàn định hướng")
 
                     Button {
                         isShowingQRSheet = true
                     } label: {
                         Image(systemName: "qrcode.viewfinder")
-                            .font(.system(size: 18))
-                            .foregroundStyle(MeshTheme.meshCyan)
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(MeshTheme.emerald)
+                            .frame(minWidth: 36, minHeight: 36)
+                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.applePressable)
+                    .accessibilityLabel("Xác thực mã QR")
                 }
             }
         }
@@ -1486,44 +1771,59 @@ public struct DirectPeerChatRoomView: View {
         .sensoryFeedback(.impact(weight: .light), trigger: sendFeedbackCount)
     }
 
-    private func directBubbleRow(_ item: ChatThreadItem) -> some View {
+    private func directBubbleRow(_ item: ChatThreadItem, showTimestamp: Bool, isLastOutgoing: Bool) -> some View {
         VStack(alignment: item.isOutgoing ? .trailing : .leading, spacing: 4) {
-            Text(item.timestamp, format: .dateTime.hour().minute())
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(MeshTheme.secondaryText)
-                .padding(.horizontal, 4)
-
-            // Dynamic Bubble (Voice / Media Image / Text)
-            if let vn = item.voiceNote {
-                VoiceNoteBubble(voiceNote: vn, itemID: item.id, isOutgoing: item.isOutgoing)
-            } else if item.mediaData != nil || item.mediaTransferID != nil {
-                MediaImageBubble(item: item, isOutgoing: item.isOutgoing)
-            } else {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(item.text)
-                        .font(.body)
-                        .foregroundStyle(item.isOutgoing ? Color.white : MeshTheme.primaryText)
-
-                    if let coord = item.coordinate {
-                        GeoLocationLinkChip(coordinate: coord, label: "Tọa độ từ \(item.senderName)")
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(
-                    item.isOutgoing ? MeshTheme.emerald : MeshTheme.cardSurface,
-                    in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-                )
-                .frame(maxWidth: 320, alignment: item.isOutgoing ? .trailing : .leading)
+            if showTimestamp {
+                Text(item.timestamp, format: .dateTime.hour().minute())
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(MeshTheme.secondaryText)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 4)
             }
 
-            HopPathBadge(
-                routeNames: item.routeNames,
-                hopCount: item.hopCount,
-                deliveryState: item.isOutgoing ? item.deliveryState : nil,
-                rttMs: item.rttMs
+            // Dynamic Bubble (Voice / Media Image / Text)
+            Group {
+                if let vn = item.voiceNote {
+                    VoiceNoteBubble(voiceNote: vn, itemID: item.id, isOutgoing: item.isOutgoing)
+                } else if item.mediaData != nil || item.mediaTransferID != nil {
+                    MediaImageBubble(item: item, isOutgoing: item.isOutgoing)
+                } else {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(item.text)
+                            .font(.body)
+                            .foregroundStyle(item.isOutgoing ? Color.white : MeshTheme.primaryText)
+
+                        if let coord = item.coordinate {
+                            GeoLocationLinkChip(
+                                coordinate: coord,
+                                label: "Tọa độ từ \(item.senderName)",
+                                isOnAccent: item.isOutgoing
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(
+                        item.isOutgoing ? MeshTheme.emeraldDark : MeshTheme.cardSurface,
+                        in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    )
+                    .frame(maxWidth: 320, alignment: item.isOutgoing ? .trailing : .leading)
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(MeshTheme.animation(reduceMotion: reduceMotion)) {
+                    expandedTelemetryID = (expandedTelemetryID == item.id) ? nil : item.id
+                }
+                isComposerFocused = false
+                dismissKeyboard()
+            }
+
+            MessageTelemetryFooter(
+                item: item,
+                isLastOutgoing: isLastOutgoing,
+                isExpanded: expandedTelemetryID == item.id
             )
-            .padding(.horizontal, 4)
         }
         .frame(maxWidth: .infinity, alignment: item.isOutgoing ? .trailing : .leading)
     }

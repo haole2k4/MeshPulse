@@ -3,91 +3,85 @@ import MeshCore
 import SwiftUI
 
 /// Tab 2 (`Sơ đồ / Map`): Dedicated topology and multi-hop routing graph.
-/// - Glass circle button `<` inspired by the top-left navigation control in the Meshtastic reference
+/// - Native iOS `NavigationStack` with large title and routing strategy toolbar pill
 /// - Real-time canvas with animated packet pulses, P2P (Emerald) & Relayed (Amber) links
-/// - Flat 24pt rounded surface, clean legend, and routing strategy indicator
+/// - Flat 24pt rounded surface, adaptive legend, and live peer/link count summary
 public struct MapTab: View {
     public var coordinator: MeshCoordinator
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var canvasResetTrigger = 0
 
     public init(coordinator: MeshCoordinator) {
         self.coordinator = coordinator
     }
 
     public var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                // Top Navigation Bar with Glass Circle Button
-                topNavigationBar
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    // Real-Time Canvas Topology Card
+                    radarCanvasCard
 
-                // Real-Time Canvas Topology Card
-                radarCanvasCard
-
-                // Routing Strategy & Legend Bar
-                strategyAndLegendSection
+                    // Routing Strategy & Legend Bar
+                    strategyAndLegendSection
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 96)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 16)
-            .padding(.bottom, 96)
+            .background(MeshTheme.background)
+            .navigationTitle("Sơ đồ")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    routingStrategyPill
+                }
+            }
+            #else
+            .toolbar {
+                ToolbarItem(placement: .automatic) {
+                    routingStrategyPill
+                }
+            }
+            #endif
         }
-        .background(MeshTheme.background)
     }
 
-    // MARK: - Top Navigation Bar
+    // MARK: - Toolbar Pill
 
-    private var topNavigationBar: some View {
-        HStack(alignment: .center, spacing: 12) {
-            // Glass Circle Button like `<` in Meshtastic reference
-            Button {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
-                    canvasResetTrigger += 1
-                }
-            } label: {
-                Image(systemName: "point.3.connected.trianglepath.dotted")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(MeshTheme.emerald)
-                    .frame(width: 40, height: 40)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .overlay {
-                        Circle()
-                            .stroke(Color.white.opacity(0.18), lineWidth: 0.5)
-                    }
-                    .shadow(color: Color.black.opacity(0.2), radius: 8, x: 0, y: 3)
-            }
-            .buttonStyle(.plain)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Sơ đồ Định tuyến")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(MeshTheme.primaryText)
-
-                Text("\(coordinator.peers.count) trạm · \(coordinator.topologyEdges.count) liên kết")
-                    .font(.caption2)
-                    .foregroundStyle(MeshTheme.secondaryText)
-            }
-
-            Spacer()
-
-            // Active Routing Strategy Pill
-            HStack(spacing: 5) {
-                Image(systemName: coordinator.routingStrategy.systemImage)
-                    .font(.system(size: 10, weight: .bold))
-                Text(coordinator.routingStrategy.title)
-                    .font(.system(size: 11, weight: .semibold))
-            }
-            .foregroundStyle(MeshTheme.emerald)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(MeshTheme.emerald.opacity(0.14), in: Capsule())
+    private var routingStrategyPill: some View {
+        HStack(spacing: 5) {
+            Image(systemName: coordinator.routingStrategy.systemImage)
+                .font(.system(size: 10, weight: .bold))
+            Text(coordinator.routingStrategy.title)
+                .font(.system(size: 11, weight: .semibold))
+                .lineLimit(1)
         }
+        .foregroundStyle(MeshTheme.emerald)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(MeshTheme.emerald.opacity(0.14), in: Capsule())
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     // MARK: - Radar Canvas Card
 
     private var radarCanvasCard: some View {
         VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: coordinator.isRadioEnabled ? "antenna.radiowaves.left.and.right" : "antenna.radiowaves.left.and.right.slash")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(coordinator.isRadioEnabled ? MeshTheme.emerald : MeshTheme.sosCrimson)
+
+                Text("\(coordinator.peers.count) trạm · \(coordinator.topologyEdges.count) liên kết")
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(MeshTheme.secondaryText)
+                    .lineLimit(1)
+
+                Spacer(minLength: 0)
+            }
+
             TimelineView(
                 .animation(
                     minimumInterval: 1.0 / 60.0,
@@ -123,41 +117,68 @@ public struct MapTab: View {
     // MARK: - Legend & Strategy
 
     private var strategyAndLegendSection: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 16) {
-                HStack(spacing: 6) {
-                    Capsule()
-                        .fill(MeshTheme.emerald)
-                        .frame(width: 14, height: 4)
-                    Text("1-Hop P2P")
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(MeshTheme.secondaryText)
-                }
-
-                HStack(spacing: 6) {
-                    HStack(spacing: 2) {
-                        Capsule().fill(MeshTheme.meshAmber).frame(width: 5, height: 4)
-                        Capsule().fill(MeshTheme.meshAmber).frame(width: 5, height: 4)
-                    }
-                    Text("Bắc cầu Multi-Hop")
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(MeshTheme.secondaryText)
-                }
-
-                Spacer()
-
-                HStack(spacing: 5) {
-                    Circle()
-                        .fill(MeshTheme.dtnIndigo)
-                        .frame(width: 6, height: 6)
-                    Text("DTN: \(coordinator.dtnRecords.count)")
-                        .font(.caption2.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(MeshTheme.secondaryText)
-                }
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                directLegendItem
+                relayedLegendItem
+                Spacer(minLength: 8)
+                dtnLegendItem
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .background(MeshTheme.cardSurface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 12) {
+                    directLegendItem
+                    relayedLegendItem
+                    Spacer(minLength: 0)
+                }
+                dtnLegendItem
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(MeshTheme.cardSurface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+    }
+
+    private var directLegendItem: some View {
+        HStack(spacing: 6) {
+            Capsule()
+                .fill(MeshTheme.emerald)
+                .frame(width: 14, height: 4)
+            Text("1-Hop P2P")
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(MeshTheme.secondaryText)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+        }
+    }
+
+    private var relayedLegendItem: some View {
+        HStack(spacing: 6) {
+            HStack(spacing: 2) {
+                Capsule().fill(MeshTheme.meshAmber).frame(width: 5, height: 4)
+                Capsule().fill(MeshTheme.meshAmber).frame(width: 5, height: 4)
+            }
+            Text("Bắc cầu Multi-Hop")
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(MeshTheme.secondaryText)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+        }
+    }
+
+    private var dtnLegendItem: some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(MeshTheme.dtnIndigo)
+                .frame(width: 6, height: 6)
+            Text("DTN: \(coordinator.dtnRecords.count)")
+                .font(.caption2.weight(.semibold).monospacedDigit())
+                .foregroundStyle(MeshTheme.secondaryText)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
         }
     }
 

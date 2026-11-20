@@ -19,9 +19,9 @@ public struct QRTrustSheet: View {
     public let onSimulateKeyConflict: ((String) -> Void)?
 
     @State private var selectedTab: Int = 0
-    @State private var inputURI: String = ""
     @State private var statusFeedback: String?
     @State private var generatedImage: Image?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public init(
         localNode: NodeIdentity,
@@ -39,41 +39,41 @@ public struct QRTrustSheet: View {
 
     public var body: some View {
         NavigationStack {
-            ZStack {
-                MeshTheme.background
-                    .ignoresSafeArea()
-
-                VStack(spacing: 16) {
+            ScrollView {
+                VStack(spacing: 20) {
                     Picker("Chế độ", selection: $selectedTab) {
                         Text("Mã QR Của Bạn").tag(0)
                         Text(targetPeer != nil ? "Xác Thực Đối Tác" : "Quét Mã Đối Tác").tag(1)
                     }
                     .pickerStyle(.segmented)
                     .padding(.horizontal, 20)
-                    .padding(.top, 12)
+                    .padding(.top, 8)
 
                     if selectedTab == 0 {
                         myQRCodeView
                     } else {
                         verifyPeerSection
                     }
-
-                    Spacer()
                 }
+                .padding(.bottom, 28)
             }
+            .scrollIndicators(.hidden)
+            .background(MeshTheme.background)
             .navigationTitle("Xác Thực An Toàn (TOFU)")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .confirmationAction) {
                     Button("Xong") {
                         dismiss()
                     }
+                    .fontWeight(.semibold)
                     .foregroundStyle(MeshTheme.emerald)
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.fraction(0.78), .large])
         .presentationDragIndicator(.visible)
+        .presentationBackground(MeshTheme.background)
         .onAppear {
             generateQRCodeImage()
             if targetPeer != nil {
@@ -86,22 +86,22 @@ public struct QRTrustSheet: View {
 
     private var myQRCodeView: some View {
         VStack(spacing: 20) {
-            VStack(spacing: 8) {
+            VStack(spacing: 6) {
                 Text(localNode.displayName)
-                    .font(.headline)
+                    .font(.title3.weight(.bold))
                     .foregroundStyle(MeshTheme.primaryText)
                 Text("ID: \(localNode.nodeID)")
                     .font(.caption.monospaced())
                     .foregroundStyle(MeshTheme.secondaryText)
             }
-            .padding(.top, 8)
+            .padding(.top, 4)
 
             // QR Code Container
             ZStack {
-                RoundedRectangle(cornerRadius: 16)
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .fill(Color.white)
-                    .frame(width: 220, height: 220)
-                    .shadow(color: MeshTheme.emerald.opacity(0.15), radius: 16)
+                    .frame(width: 224, height: 224)
+                    .shadow(color: MeshTheme.emerald.opacity(0.18), radius: 16, y: 4)
 
                 if let img = generatedImage {
                     img
@@ -111,56 +111,67 @@ public struct QRTrustSheet: View {
                         .frame(width: 200, height: 200)
                 } else {
                     ProgressView()
+                        .tint(MeshTheme.emeraldDark)
                 }
             }
 
-            VStack(spacing: 6) {
+            VStack(spacing: 8) {
                 Text("VÂN TAY KHÓA CÔNG KHAI")
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(MeshTheme.secondaryText)
                 Text(localNode.publicKeyFingerprint ?? "N/A")
                     .font(.system(.body, design: .monospaced, weight: .bold))
-                    .foregroundStyle(MeshTheme.emerald)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 6)
-                    .background(MeshTheme.emerald.opacity(0.12), in: Capsule())
+                    .foregroundStyle(MeshTheme.emeraldLight)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(MeshTheme.emerald.opacity(0.14), in: Capsule())
             }
 
             Text("Để đối tác quét mã này bằng camera để xác thực khóa tận tay (Out-of-Band), bảo vệ vĩnh viễn khỏi tấn công nghe lén giả mạo.")
                 .font(.footnote)
                 .foregroundStyle(MeshTheme.secondaryText)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 28)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 24)
         }
     }
 
     // MARK: - Tab 2: Verify Peer
 
     private var verifyPeerSection: some View {
-        VStack(spacing: 18) {
+        VStack(spacing: 16) {
             if let peer = targetPeer {
-                VStack(spacing: 12) {
+                VStack(spacing: 14) {
                     HStack(spacing: 12) {
-                        Image(systemName: "antenna.radiowaves.left.and.right")
-                            .font(.title2)
-                            .foregroundStyle(MeshTheme.emerald)
+                        ZStack {
+                            Circle()
+                                .fill(MeshTheme.emerald.opacity(0.14))
+                                .frame(width: 42, height: 42)
+                            Image(systemName: "antenna.radiowaves.left.and.right")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(MeshTheme.emerald)
+                        }
 
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(peer.displayName)
+                            Text(peer.identity.displayName)
                                 .font(.headline)
                                 .foregroundStyle(MeshTheme.primaryText)
-                            Text("ID: \(peer.nodeID)")
+                                .lineLimit(1)
+                            Text("ID: \(peer.identity.nodeID)")
                                 .font(.caption.monospaced())
                                 .foregroundStyle(MeshTheme.secondaryText)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
                         }
-                        Spacer()
-                        PeerTrustBadge(trustState: peer.trustState)
+                        Spacer(minLength: 8)
+                        PeerTrustBadge(trustState: peer.trustState, compact: true)
+                            .fixedSize(horizontal: true, vertical: false)
                     }
                     .padding(14)
-                    .background(MeshTheme.cardBackground, in: RoundedRectangle(cornerRadius: 14))
+                    .background(MeshTheme.cardSurface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
                     if peer.trustState == .keyConflict {
-                        VStack(alignment: .leading, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 10) {
                             HStack(spacing: 8) {
                                 Image(systemName: "exclamationmark.triangle.fill")
                                     .foregroundStyle(MeshTheme.sosCrimson)
@@ -170,112 +181,142 @@ public struct QRTrustSheet: View {
                             }
                             Text("Khóa công khai nhận được từ sóng radio khác với khóa đã ghim ban đầu. Đây có thể là tấn công giả mạo hoặc trạm đã cài đặt lại máy.")
                                 .font(.caption)
-                                .foregroundStyle(MeshTheme.secondaryText)
+                                .foregroundStyle(MeshTheme.primaryText.opacity(0.9))
+                                .fixedSize(horizontal: false, vertical: true)
 
-                            Button(action: {
-                                onTrustConflictingKey?(peer.nodeID)
-                                statusFeedback = "✓ Đã chấp nhận và ghim khóa công khai mới."
-                            }) {
-                                HStack {
+                            Button {
+                                onTrustConflictingKey?(peer.identity.nodeID)
+                                withAnimation(MeshTheme.animation(reduceMotion: reduceMotion)) {
+                                    statusFeedback = "✓ Đã chấp nhận và ghim khóa công khai mới."
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
                                     Image(systemName: "checkmark.shield")
                                     Text("Tôi tin tưởng & Ghim Khóa Mới")
                                 }
-                                .font(.caption.weight(.semibold))
+                                .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(.white)
                                 .frame(maxWidth: .infinity)
-                                .padding(.vertical, 8)
-                                .background(MeshTheme.meshAmber, in: RoundedRectangle(cornerRadius: 8))
+                                .frame(minHeight: MeshTheme.minTapDimension)
+                                .background(MeshTheme.meshAmber, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                             }
+                            .buttonStyle(.applePressable)
                         }
                         .padding(14)
-                        .background(MeshTheme.sosCrimson.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
-                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(MeshTheme.sosCrimson.opacity(0.35), lineWidth: 1))
+                        .background(MeshTheme.sosCrimson.opacity(0.14), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .stroke(MeshTheme.sosCrimson.opacity(0.35), lineWidth: 1)
+                        )
                     }
 
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Vân tay đối chiếu:")
+                        Text("VÂN TAY ĐỐI CHIẾU")
                             .font(.caption2.weight(.bold))
                             .foregroundStyle(MeshTheme.secondaryText)
-                        Text(peer.publicKeyFingerprint ?? "Không có khóa")
-                            .font(.caption.monospaced())
+                        Text(peer.identity.publicKeyFingerprint ?? "Không có khóa")
+                            .font(.subheadline.monospaced().weight(.semibold))
                             .foregroundStyle(MeshTheme.primaryText)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 4)
+                    .padding(14)
+                    .background(MeshTheme.cardSurface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
                     // Action buttons
                     VStack(spacing: 10) {
-                        Button(action: {
-                            if let fp = peer.publicKeyFingerprint {
-                                onVerifyPeer?(peer.nodeID, fp)
-                                statusFeedback = "🛡️ Đã xác thực trạm thành công!"
+                        Button {
+                            if let fp = peer.identity.publicKeyFingerprint {
+                                onVerifyPeer?(peer.identity.nodeID, fp)
+                                withAnimation(MeshTheme.animation(reduceMotion: reduceMotion)) {
+                                    statusFeedback = "🛡️ Đã xác thực trạm thành công!"
+                                }
                             }
-                        }) {
-                            HStack {
+                        } label: {
+                            HStack(spacing: 8) {
                                 Image(systemName: "checkmark.shield.fill")
                                 Text("Xác Thực Vân Tay Khớp (Quét QR)")
                             }
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.black)
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(.white)
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background(MeshTheme.emerald, in: RoundedRectangle(cornerRadius: 10))
+                            .frame(height: 48)
+                            .background(MeshTheme.emeraldDark, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                         }
+                        .buttonStyle(.applePressable)
 
                         // Simulation / testing buttons
                         HStack(spacing: 10) {
-                            Button(action: {
-                                onSimulateKeyConflict?(peer.nodeID)
-                                statusFeedback = "⚠️ Đã kích hoạt xung đột khóa giả lập."
-                            }) {
-                                HStack(spacing: 4) {
+                            Button {
+                                onSimulateKeyConflict?(peer.identity.nodeID)
+                                withAnimation(MeshTheme.animation(reduceMotion: reduceMotion)) {
+                                    statusFeedback = "⚠️ Đã kích hoạt xung đột khóa giả lập."
+                                }
+                            } label: {
+                                HStack(spacing: 5) {
                                     Image(systemName: "exclamationmark.triangle")
                                     Text("Giả lập MITM")
                                 }
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(MeshTheme.meshAmber)
                                 .frame(maxWidth: .infinity)
-                                .padding(.vertical, 8)
-                                .background(MeshTheme.meshAmber.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                                .frame(minHeight: MeshTheme.minTapDimension)
+                                .background(MeshTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                             }
+                            .buttonStyle(.applePressable)
 
-                            Button(action: {
-                                if let fp = peer.publicKeyFingerprint {
-                                    onVerifyPeer?(peer.nodeID, fp)
-                                    statusFeedback = "🛡️ Đã chuyển sang Trạng thái Xác thực."
+                            Button {
+                                if let fp = peer.identity.publicKeyFingerprint {
+                                    onVerifyPeer?(peer.identity.nodeID, fp)
+                                    withAnimation(MeshTheme.animation(reduceMotion: reduceMotion)) {
+                                        statusFeedback = "🛡️ Đã chuyển sang Trạng thái Xác thực."
+                                    }
                                 }
-                            }) {
-                                HStack(spacing: 4) {
+                            } label: {
+                                HStack(spacing: 5) {
                                     Image(systemName: "qrcode.viewfinder")
                                     Text("Mô phỏng Quét")
                                 }
                                 .font(.caption.weight(.semibold))
-                                .foregroundStyle(MeshTheme.emerald)
+                                .foregroundStyle(MeshTheme.emeraldLight)
                                 .frame(maxWidth: .infinity)
-                                .padding(.vertical, 8)
-                                .background(MeshTheme.emerald.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                                .frame(minHeight: MeshTheme.minTapDimension)
+                                .background(MeshTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                             }
+                            .buttonStyle(.applePressable)
                         }
                     }
                 }
                 .padding(.horizontal, 20)
             } else {
-                Text("Chọn một trạm từ danh sách Trạm Mạng để xác thực khóa công khai.")
-                    .font(.subheadline)
-                    .foregroundStyle(MeshTheme.secondaryText)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
-                    .padding(.top, 40)
+                VStack(spacing: 12) {
+                    Image(systemName: "qrcode.viewfinder")
+                        .font(.system(size: 36, weight: .semibold))
+                        .foregroundStyle(MeshTheme.emerald.opacity(0.8))
+                    Text("Chọn một trạm từ danh sách Trạm Mạng để xác thực khóa công khai.")
+                        .font(.subheadline)
+                        .foregroundStyle(MeshTheme.secondaryText)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 32)
+                .padding(.top, 36)
             }
 
             if let fb = statusFeedback {
                 Text(fb)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(MeshTheme.emerald)
-                    .padding(.top, 6)
+                    .foregroundStyle(MeshTheme.emeraldLight)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(MeshTheme.emerald.opacity(0.12), in: Capsule())
+                    .padding(.horizontal, 20)
             }
         }
     }

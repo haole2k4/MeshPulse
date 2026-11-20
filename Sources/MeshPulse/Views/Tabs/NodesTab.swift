@@ -3,7 +3,7 @@ import MeshCore
 import SwiftUI
 
 /// Tab 1 (`Trạm Mạng / Nodes`): Dedicated station inspection tab built to Meshtastic specifications:
-/// - Prominent NodeDetailCard with circular avatar + SwiftUI Gauge signal meter
+/// - Prominent NodeDetailCard with circular avatar + custom circular signal meter
 /// - Flat grouped table of all other stations in the mesh network
 public struct NodesTab: View {
     public var coordinator: MeshCoordinator
@@ -16,73 +16,71 @@ public struct NodesTab: View {
     }
 
     public var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                // Header Title & Station Count
-                headerSection
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    // Online station count subtitle
+                    Text(coordinator.isRadioEnabled
+                         ? "\(coordinator.peers.count) trạm đang trực tuyến trong vùng phủ sóng"
+                         : "Sóng vô tuyến đang tắt")
+                        .font(.subheadline)
+                        .foregroundStyle(MeshTheme.secondaryText)
+                        .padding(.horizontal, 4)
 
-                if !coordinator.isRadioEnabled {
-                    radioDisabledState
-                } else if coordinator.peers.isEmpty {
-                    scanningState
-                } else {
-                    // Hero Node Detail Card (Meshtastic Reference Layout)
-                    if let activePeer = resolvedActivePeer {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("CHI TIẾT TRẠM ĐANG CHỌN")
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundStyle(MeshTheme.secondaryText)
-                                .padding(.horizontal, 4)
+                    if !coordinator.isRadioEnabled {
+                        radioDisabledState
+                    } else if coordinator.peers.isEmpty {
+                        scanningState
+                    } else {
+                        // Hero Node Detail Card (Apple Contacts / Find My Reference Layout)
+                        if let activePeer = resolvedActivePeer {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("CHI TIẾT TRẠM ĐANG CHỌN")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundStyle(MeshTheme.secondaryText)
+                                    .padding(.horizontal, 4)
 
-                            NodeDetailCard(peer: activePeer, coordinator: coordinator)
+                                NodeDetailCard(peer: activePeer, coordinator: coordinator)
+                            }
                         }
-                    }
 
-                    // Other Stations in the Mesh Network
-                    stationsListSection
+                        // Other Stations in the Mesh Network
+                        stationsListSection
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+                .padding(.bottom, 96)
+            }
+            .background(MeshTheme.background)
+            .navigationTitle("Trạm Mạng")
+            .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    radioStatusPill
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 16)
-            .padding(.bottom, 96)
         }
-        .background(MeshTheme.background)
     }
 
-    // MARK: - Header
+    // MARK: - Radio Status Pill
 
-    private var headerSection: some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Trạm Mạng")
-                    .font(.system(size: 28, weight: .bold))
-                    .foregroundStyle(MeshTheme.primaryText)
-
-                Text(coordinator.isRadioEnabled
-                     ? "\(coordinator.peers.count) trạm đang trực tuyến trong vùng phủ sóng"
-                     : "Sóng vô tuyến đang tắt")
-                    .font(.caption)
-                    .foregroundStyle(MeshTheme.secondaryText)
-            }
-
-            Spacer()
-
-            // Radio status indicator
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(coordinator.isRadioEnabled ? MeshTheme.emerald : MeshTheme.sosCrimson)
-                    .frame(width: 8, height: 8)
-                Text(coordinator.isRadioEnabled ? "ONLINE" : "OFFLINE")
-                    .font(.system(size: 10, weight: .heavy, design: .monospaced))
-                    .foregroundStyle(coordinator.isRadioEnabled ? MeshTheme.emerald : MeshTheme.sosCrimson)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(
-                (coordinator.isRadioEnabled ? MeshTheme.emerald : MeshTheme.sosCrimson).opacity(0.14),
-                in: Capsule()
-            )
+    private var radioStatusPill: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(coordinator.isRadioEnabled ? MeshTheme.emerald : MeshTheme.sosCrimson)
+                .frame(width: 8, height: 8)
+            Text(coordinator.isRadioEnabled ? "ONLINE" : "OFFLINE")
+                .font(.system(size: 10, weight: .heavy, design: .monospaced))
+                .foregroundStyle(coordinator.isRadioEnabled ? MeshTheme.emerald : MeshTheme.sosCrimson)
         }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(
+            (coordinator.isRadioEnabled ? MeshTheme.emerald : MeshTheme.sosCrimson).opacity(0.14),
+            in: Capsule()
+        )
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     // MARK: - Station List Section
@@ -134,33 +132,39 @@ public struct NodesTab: View {
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(MeshTheme.primaryText)
                         .lineLimit(1)
+                        .truncationMode(.tail)
 
                     Text(peer.identity.nodeID.prefix(10) + "…")
                         .font(.system(size: 11, weight: .regular, design: .monospaced))
                         .foregroundStyle(MeshTheme.secondaryText)
+                        .lineLimit(1)
                 }
 
-                Spacer()
+                Spacer(minLength: 8)
 
                 HStack(spacing: 8) {
                     LinkStatusBadge(linkKind: peer.linkKind)
+                        .fixedSize(horizontal: true, vertical: false)
 
                     if let rtt = peer.lastRTTMilliseconds {
                         Text("\(rtt)ms")
                             .font(.system(size: 11, weight: .semibold, design: .monospaced))
                             .foregroundStyle(MeshTheme.emeraldLight)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                     }
 
                     Image(systemName: "chevron.right")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(MeshTheme.secondaryText.opacity(0.5))
                 }
+                .layoutPriority(1)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 11)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.applePressable(scaleDown: 0.985, pressedOpacity: 0.88))
     }
 
     private var resolvedActivePeer: PeerSummary? {
@@ -205,10 +209,11 @@ public struct NodesTab: View {
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(Color.white)
                     .padding(.horizontal, 20)
-                    .frame(height: 40)
+                    .frame(height: 44)
                     .background(MeshTheme.emerald, in: Capsule())
+                    .contentShape(Capsule())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.applePressable)
             .padding(.top, 4)
         }
         .padding(24)

@@ -13,6 +13,7 @@ public struct PinnedCRDTHeaderView: View {
     public let onDismissRollCall: (() -> Void)?
     public let onDismissPoll: (() -> Void)?
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isExpanded: Bool = true
 
     public init(
@@ -69,31 +70,55 @@ public struct PinnedCRDTHeaderView: View {
 
                 Spacer()
 
-                HStack(spacing: 12) {
+                HStack(spacing: 4) {
                     // Summary counts
-                    HStack(spacing: 6) {
-                        Text("\(rc.safeCount) ✅")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(MeshTheme.emerald)
+                    HStack(spacing: 8) {
+                        HStack(spacing: 3) {
+                            Text("\(rc.safeCount)")
+                                .font(.caption.monospacedDigit().weight(.bold))
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.caption2.weight(.bold))
+                        }
+                        .foregroundStyle(MeshTheme.emerald)
+
                         if rc.needsHelpCount > 0 {
-                            Text("\(rc.needsHelpCount) ⚠️")
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(MeshTheme.sosCrimson)
+                            HStack(spacing: 3) {
+                                Text("\(rc.needsHelpCount)")
+                                    .font(.caption.monospacedDigit().weight(.bold))
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .font(.caption2.weight(.bold))
+                            }
+                            .foregroundStyle(MeshTheme.sosCrimson)
                         }
                     }
+                    .padding(.trailing, 4)
 
-                    Button(action: { withAnimation(.spring(response: 0.3)) { isExpanded.toggle() } }) {
+                    Button {
+                        withAnimation(MeshTheme.animation(reduceMotion: reduceMotion)) {
+                            isExpanded.toggle()
+                        }
+                    } label: {
                         Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                             .font(.caption.weight(.bold))
                             .foregroundStyle(MeshTheme.secondaryText)
+                            .frame(minWidth: 36, minHeight: 36)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.applePressable)
+                    .accessibilityLabel(isExpanded ? "Thu gọn điểm danh" : "Mở rộng điểm danh")
 
                     if rc.createdByNodeID == localNodeID {
-                        Button(action: { onDismissRollCall?() }) {
+                        Button {
+                            onDismissRollCall?()
+                        } label: {
                             Image(systemName: "xmark")
-                                .font(.caption2.weight(.bold))
+                                .font(.caption.weight(.bold))
                                 .foregroundStyle(MeshTheme.secondaryText)
+                                .frame(minWidth: 36, minHeight: 36)
+                                .contentShape(Rectangle())
                         }
+                        .buttonStyle(.applePressable)
+                        .accessibilityLabel("Đóng điểm danh")
                     }
                 }
             }
@@ -105,9 +130,9 @@ public struct PinnedCRDTHeaderView: View {
             if isExpanded {
                 // Interactive 1-touch voting buttons
                 HStack(spacing: 10) {
-                    Button(action: {
+                    Button {
                         onVoteRollCall?(.safe)
-                    }) {
+                    } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "checkmark.circle.fill")
                             Text("Tôi An Toàn")
@@ -118,17 +143,19 @@ public struct PinnedCRDTHeaderView: View {
                         .padding(.vertical, 10)
                         .background(
                             myVote?.status == .safe ? MeshTheme.emerald : MeshTheme.emerald.opacity(0.14),
-                            in: RoundedRectangle(cornerRadius: 10)
+                            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
                         )
                         .overlay(
-                            RoundedRectangle(cornerRadius: 10)
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
                                 .stroke(MeshTheme.emerald.opacity(myVote?.status == .safe ? 1.0 : 0.3), lineWidth: 1)
                         )
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.applePressable)
 
-                    Button(action: {
+                    Button {
                         onVoteRollCall?(.needsHelp)
-                    }) {
+                    } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "exclamationmark.triangle.fill")
                             Text("Cần Hỗ Trợ")
@@ -139,13 +166,15 @@ public struct PinnedCRDTHeaderView: View {
                         .padding(.vertical, 10)
                         .background(
                             myVote?.status == .needsHelp ? MeshTheme.sosCrimson : MeshTheme.sosCrimson.opacity(0.14),
-                            in: RoundedRectangle(cornerRadius: 10)
+                            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
                         )
                         .overlay(
-                            RoundedRectangle(cornerRadius: 10)
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
                                 .stroke(MeshTheme.sosCrimson.opacity(myVote?.status == .needsHelp ? 1.0 : 0.3), lineWidth: 1)
                         )
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.applePressable)
                 }
 
                 // Respondent list summary
@@ -159,14 +188,15 @@ public struct PinnedCRDTHeaderView: View {
                             HStack(spacing: 6) {
                                 ForEach(Array(rc.responses.values).sorted(by: { $0.updatedAt > $1.updatedAt }), id: \.voterName) { resp in
                                     HStack(spacing: 4) {
-                                        Text(resp.status == .safe ? "✅" : "⚠️")
-                                            .font(.system(size: 9))
+                                        Image(systemName: resp.status == .safe ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                            .font(.system(size: 10, weight: .semibold))
+                                            .foregroundStyle(resp.status == .safe ? MeshTheme.emerald : MeshTheme.sosCrimson)
                                         Text(resp.voterName)
                                             .font(.system(size: 10, weight: .medium))
                                             .foregroundStyle(MeshTheme.primaryText)
                                     }
-                                    .padding(.horizontal, 7)
-                                    .padding(.vertical, 3)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
                                     .background(Color.white.opacity(0.06), in: Capsule())
                                 }
                             }
@@ -177,9 +207,9 @@ public struct PinnedCRDTHeaderView: View {
             }
         }
         .padding(12)
-        .background(MeshTheme.cardBackground, in: RoundedRectangle(cornerRadius: 14))
+        .background(MeshTheme.cardBackground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 14)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(MeshTheme.emerald.opacity(0.35), lineWidth: 1)
         )
     }
@@ -203,17 +233,23 @@ public struct PinnedCRDTHeaderView: View {
 
                 Spacer()
 
-                HStack(spacing: 8) {
+                HStack(spacing: 4) {
                     Text("\(p.totalVotes) phiếu")
                         .font(.caption.monospaced().weight(.semibold))
                         .foregroundStyle(MeshTheme.secondaryText)
 
                     if p.createdByNodeID == localNodeID {
-                        Button(action: { onDismissPoll?() }) {
+                        Button {
+                            onDismissPoll?()
+                        } label: {
                             Image(systemName: "xmark")
-                                .font(.caption2.weight(.bold))
+                                .font(.caption.weight(.bold))
                                 .foregroundStyle(MeshTheme.secondaryText)
+                                .frame(minWidth: 36, minHeight: 36)
+                                .contentShape(Rectangle())
                         }
+                        .buttonStyle(.applePressable)
+                        .accessibilityLabel("Đóng bình chọn")
                     }
                 }
             }
@@ -226,12 +262,12 @@ public struct PinnedCRDTHeaderView: View {
             VStack(spacing: 6) {
                 ForEach(p.options.indices, id: \.self) { idx in
                     let isSelected = myVote?.optionIndex == idx
-                    let count = p.voteCounts[idx] ?? 0
-                    let pct = p.percentages[idx] ?? 0.0
+                    let count = p.voteCount(forOption: idx)
+                    let pct = p.voteFraction(forOption: idx)
 
-                    Button(action: {
+                    Button {
                         onVotePoll?(idx)
-                    }) {
+                    } label: {
                         VStack(spacing: 4) {
                             HStack {
                                 HStack(spacing: 6) {
@@ -261,18 +297,22 @@ public struct PinnedCRDTHeaderView: View {
                             }
                             .frame(height: 4)
                         }
-                        .padding(.vertical, 4)
-                        .padding(.horizontal, 6)
-                        .background(isSelected ? MeshTheme.meshCyan.opacity(0.08) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 8)
+                        .background(
+                            isSelected ? MeshTheme.meshCyan.opacity(0.08) : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        )
+                        .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.applePressable)
                 }
             }
         }
         .padding(12)
-        .background(MeshTheme.cardBackground, in: RoundedRectangle(cornerRadius: 14))
+        .background(MeshTheme.cardBackground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 14)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(MeshTheme.meshCyan.opacity(0.35), lineWidth: 1)
         )
     }

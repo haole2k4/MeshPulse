@@ -91,11 +91,40 @@ public struct MediaTransferProgress: Sendable, Equatable, Codable, Identifiable 
         self.assembledData = assembledData
         self.timestamp = timestamp
     }
+
+    /// Convenience initializer for lightweight progress tracking (e.g. Live Activities / outgoing placeholders).
+    public init(
+        transferID: UUID,
+        totalChunks: Int,
+        receivedChunks: Int,
+        totalBytes: Int,
+        isComplete _: Bool
+    ) {
+        self.init(
+            transferID: transferID,
+            senderID: "",
+            senderName: "",
+            targetID: "",
+            caption: "",
+            mimeType: "image/jpeg",
+            receivedChunks: receivedChunks,
+            totalChunks: totalChunks,
+            totalBytes: totalBytes,
+            routeNames: [],
+            hopCount: 0,
+            isEncrypted: false
+        )
+    }
 }
 
 /// Splits compressed media (`Data`) into fixed-size `16 KB` chunks for multi-hop mesh routing.
 public enum MeshChunker: Sendable {
     public static let defaultChunkSizeBytes = 16_384 // 16 KB per chunk
+
+    public static func chunkCount(for byteCount: Int, chunkSize: Int = defaultChunkSizeBytes) -> Int {
+        let effectiveChunkSize = max(256, chunkSize)
+        return max(1, (byteCount + effectiveChunkSize - 1) / effectiveChunkSize)
+    }
 
     public static func split(
         data: Data,

@@ -241,10 +241,10 @@ public final class MeshCoordinator {
 
     public var latestLocalCoordinate: GeoCoordinate? {
         if isMockMode {
-            return mockNetwork.node(SimulatedMeshNetwork.nodeAID)?.router.latestLocalCoordinate
+            return mockNetwork.node(SimulatedMeshNetwork.nodeAID)?.router.localCoordinate
                 ?? GeoCoordinate(latitude: 10.772612, longitude: 106.657891, accuracyMeters: 6.5)
         }
-        return liveRouter.latestLocalCoordinate
+        return liveRouter.localCoordinate
     }
 
     // MARK: Engines & Platform Adapters
@@ -476,8 +476,8 @@ public final class MeshCoordinator {
                         identity: identity,
                         linkKind: .offlineDTN,
                         lastSeen: .distantPast,
-                        trustState: mockNetwork.node(SimulatedMeshNetwork.nodeAID)?.router.peerTrustStates[mockID] ?? .unverifiedTOFU,
-                        lastCoordinate: mockNetwork.node(mockID)?.router.latestLocalCoordinate
+                        trustState: mockNetwork.node(SimulatedMeshNetwork.nodeAID)?.router.trustState(for: mockID) ?? .unverifiedTOFU,
+                        lastCoordinate: mockNetwork.node(mockID)?.router.localCoordinate
                     )
                 }
             }
@@ -515,8 +515,8 @@ public final class MeshCoordinator {
                 items.last(where: { !$0.isOutgoing })?.senderName
                 ?? peerID
             let trust: PeerTrustState = isMockMode
-                ? (mockNetwork.node(SimulatedMeshNetwork.nodeAID)?.router.peerTrustStates[peerID] ?? .unverifiedTOFU)
-                : (liveRouter.peerTrustStates[peerID] ?? .unverifiedTOFU)
+                ? (mockNetwork.node(SimulatedMeshNetwork.nodeAID)?.router.trustState(for: peerID) ?? .unverifiedTOFU)
+                : liveRouter.trustState(for: peerID)
             byID[peerID] = PeerSummary(
                 identity: NodeIdentity(nodeID: peerID, displayName: resolvedName),
                 linkKind: .offlineDTN,
@@ -546,9 +546,9 @@ public final class MeshCoordinator {
                 identity: mockIdentity,
                 linkKind: .offlineDTN,
                 lastSeen: .distantPast,
-                trustState: mockNetwork.node(SimulatedMeshNetwork.nodeAID)?.router.peerTrustStates[peerID] ?? .unverifiedTOFU,
-                conflictPublicKeyBase64: mockNetwork.node(SimulatedMeshNetwork.nodeAID)?.router.conflictingKeys[peerID],
-                lastCoordinate: mockNetwork.node(peerID)?.router.latestLocalCoordinate
+                trustState: mockNetwork.node(SimulatedMeshNetwork.nodeAID)?.router.trustState(for: peerID) ?? .unverifiedTOFU,
+                conflictPublicKeyBase64: mockNetwork.node(SimulatedMeshNetwork.nodeAID)?.router.conflictingKey(for: peerID),
+                lastCoordinate: mockNetwork.node(peerID)?.router.localCoordinate
             )
         }
         let fallbackName =
@@ -558,8 +558,8 @@ public final class MeshCoordinator {
             identity: NodeIdentity(nodeID: peerID, displayName: fallbackName),
             linkKind: .offlineDTN,
             lastSeen: directThreads[peerID]?.last?.timestamp ?? .distantPast,
-            trustState: liveRouter.peerTrustStates[peerID] ?? .unverifiedTOFU,
-            conflictPublicKeyBase64: liveRouter.conflictingKeys[peerID],
+            trustState: liveRouter.trustState(for: peerID),
+            conflictPublicKeyBase64: liveRouter.conflictingKey(for: peerID),
             lastCoordinate: liveRouter.knownPeers.first(where: { $0.id == peerID })?.lastCoordinate
         )
     }
@@ -1041,9 +1041,9 @@ public final class MeshCoordinator {
             createdAt: Date(),
             responses: [
                 myID: RollCallVote(
-                    nodeID: myID,
-                    status: .safe,
+                    voterNodeID: myID,
                     voterName: localDisplayName,
+                    status: .safe,
                     coordinate: latestLocalCoordinate,
                     updatedAt: Date()
                 )
@@ -1067,12 +1067,12 @@ public final class MeshCoordinator {
     public func voteRollCall(status: SafetyStatus) {
         guard var current = activeRollCall else { return }
         let myID = isMockMode ? SimulatedMeshNetwork.nodeAID : liveRouter.localIdentity.nodeID
-        current.recordResponse(
+        current.recordVote(
             nodeID: myID,
+            displayName: localDisplayName,
             status: status,
-            voterName: localDisplayName,
             coordinate: latestLocalCoordinate,
-            updatedAt: Date()
+            at: Date()
         )
 
         if isMockMode {
@@ -1124,11 +1124,11 @@ public final class MeshCoordinator {
     public func votePoll(optionIndex: Int) {
         guard var current = activePoll else { return }
         let myID = isMockMode ? SimulatedMeshNetwork.nodeAID : liveRouter.localIdentity.nodeID
-        current.recordVote(
+        current.castVote(
             nodeID: myID,
+            displayName: localDisplayName,
             optionIndex: optionIndex,
-            voterName: localDisplayName,
-            updatedAt: Date()
+            at: Date()
         )
 
         if isMockMode {
@@ -1154,27 +1154,25 @@ public final class MeshCoordinator {
     public func verifyPeerOutOfBand(peerID: String, fingerprint: String) {
         if isMockMode {
             _ = mockNetwork.verifyPeerOutOfBand(
+                on: SimulatedMeshNetwork.nodeAID,
                 peerID: peerID,
-                onNodeID: SimulatedMeshNetwork.nodeAID,
                 fingerprint: fingerprint
             )
             syncFromMockNodeState()
         } else {
-            let (_, effects) = liveRouter.verifyPeerOutOfBand(peerID: peerID, fingerprint: fingerprint)
-            processLiveEffects(effects)
+            _ = liveRouter.verifyPeerOutOfBand(nodeID: peerID, fingerprint: fingerprint)
         }
     }
 
     public func trustConflictingKey(peerID: String) {
         if isMockMode {
             mockNetwork.trustConflictingKey(
-                peerID: peerID,
-                onNodeID: SimulatedMeshNetwork.nodeAID
+                on: SimulatedMeshNetwork.nodeAID,
+                peerID: peerID
             )
             syncFromMockNodeState()
         } else {
-            let effects = liveRouter.trustConflictingKey(peerID: peerID)
-            processLiveEffects(effects)
+            liveRouter.trustConflictingKey(for: peerID)
         }
     }
 
@@ -1182,9 +1180,9 @@ public final class MeshCoordinator {
         guard isMockMode else { return }
         let spoofedKey = "SPOOFED_KEY_\(UUID().uuidString.prefix(8))"
         mockNetwork.simulateKeyConflict(
-            onNodeID: SimulatedMeshNetwork.nodeAID,
+            on: SimulatedMeshNetwork.nodeAID,
             peerID: peerID,
-            spoofedPublicKey: spoofedKey
+            conflictingPublicKeyBase64: spoofedKey
         )
         syncFromMockNodeState()
     }

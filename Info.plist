@@ -49,8 +49,6 @@
 	<string>MeshPulse sử dụng camera để quét mã QR xác thực khóa công khai chống tấn công giả mạo trạm.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>MeshPulse cho phép chọn ảnh để nén và gửi phân mảnh đa bước nhảy qua mạng Mesh.</string>
-	<key>NSSupportsLiveActivities</key>
-	<true/>
 	<key>UILaunchScreen</key>
 	<dict/>
 </dict>

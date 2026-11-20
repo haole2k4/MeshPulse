@@ -313,6 +313,14 @@ public struct MeshRouter: Sendable {
         peerCoordinates[peerID] = coordinate
     }
 
+    public func trustState(for peerID: String) -> PeerTrustState {
+        peerTrustStates[peerID] ?? .unverifiedTOFU
+    }
+
+    public func conflictingKey(for peerID: String) -> String? {
+        peerConflictKeys[peerID]
+    }
+
     /// Out-of-Band QR verification (`meshpulse://verify?node=<id>&fp=<fingerprint>[&key=<base64>]`).
     /// Pins the verified key, clears any MITM key conflict, and upgrades trust state to `.verifiedOutOfBand`.
     @discardableResult

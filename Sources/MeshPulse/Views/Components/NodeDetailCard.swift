@@ -5,15 +5,15 @@ import SwiftUI
 import UIKit
 #endif
 
-/// Detailed Station Inspection Card modeled after the Meshtastic iOS "Node" layout:
-/// - Visual Summary Row: 64x64pt soft-tinted circular avatar + circular SwiftUI `Gauge` measuring signal/latency
-/// - Clean Flat Property Rows: Name, Node ID, Route path, and Public Key with one-tap Copy button
-/// - Collapsible Action Pill: "Thao tác với trạm ⌄" revealing Ping, Encrypted Message, and Link Severing
+/// Detailed Station Inspection Card modeled after Apple Contacts / Find My:
+/// - Visual Summary Row: 56x56pt soft-tinted circular avatar + custom circular signal ring
+/// - Full-width horizontally scrollable status/trust badges row
+/// - Clean Inset Grouped Property Rows: Route path and Public Key with one-tap Copy
+/// - Direct Action Section: Full-width Primary CTA + 4 uniform Quick Action tiles
 public struct NodeDetailCard: View {
     public let peer: PeerSummary
     public var coordinator: MeshCoordinator
 
-    @State private var isActionsExpanded = false
     @State private var hasCopiedKey = false
     @State private var pingFeedbackCount = 0
     @State private var showingCompassSheet = false
@@ -26,60 +26,62 @@ public struct NodeDetailCard: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // MARK: 1. Visual Summary Row (64x64 Avatar & SwiftUI Gauge)
-            HStack(alignment: .center, spacing: 14) {
-                // Station Avatar Circle (64x64pt)
+            // MARK: 1. Header Row (56x56 Avatar, Name/ID, Custom 56x56 Signal Ring)
+            HStack(alignment: .center, spacing: 12) {
                 ZStack {
                     Circle()
                         .fill(MeshTheme.emerald.opacity(0.16))
-                        .frame(width: 64, height: 64)
+                        .frame(width: 56, height: 56)
 
                     Text(stationMonogram)
-                        .font(.system(size: 22, weight: .heavy, design: .rounded))
+                        .font(.system(size: 19, weight: .heavy, design: .rounded))
                         .foregroundStyle(MeshTheme.emerald)
                 }
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(peer.identity.displayName)
                         .font(.system(size: 19, weight: .bold))
                         .foregroundStyle(MeshTheme.primaryText)
                         .lineLimit(1)
 
-                    HStack(spacing: 6) {
-                        LinkStatusBadge(linkKind: peer.linkKind)
-                        PeerTrustBadge(trustState: peer.trustState, compact: true)
-                        if isBlocked {
-                            Text("Đã chặn")
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(MeshTheme.sosCrimson)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(MeshTheme.sosCrimson.opacity(0.18), in: Capsule())
-                        }
-                    }
+                    Text("ID: \(peer.identity.nodeID)")
+                        .font(.system(size: 12, weight: .regular, design: .monospaced))
+                        .foregroundStyle(MeshTheme.secondaryText)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
 
-                Spacer()
+                Spacer(minLength: 8)
 
-                // Circular SwiftUI Gauge: Signal Quality & Latency
-                Gauge(value: signalQualityPercent, in: 0...100) {
-                    Text("Tín hiệu")
-                } currentValueLabel: {
-                    VStack(spacing: 0) {
-                        Text("\(Int(signalQualityPercent))%")
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
-                            .foregroundStyle(MeshTheme.primaryText)
-                        Text(latencyLabel)
-                            .font(.system(size: 8, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(MeshTheme.secondaryText)
-                    }
-                }
-                .gaugeStyle(.accessoryCircular)
-                .tint(Gradient(colors: [.red, .yellow, MeshTheme.emerald]))
-                .scaleEffect(1.15)
-                .frame(width: 60, height: 60)
+                signalRingView
             }
-            .padding(16)
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 12)
+
+            // Full-width horizontally scrollable badge row
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    LinkStatusBadge(linkKind: peer.linkKind)
+                        .fixedSize(horizontal: true, vertical: false)
+
+                    PeerTrustBadge(trustState: peer.trustState, compact: true)
+                        .fixedSize(horizontal: true, vertical: false)
+
+                    if isBlocked {
+                        Text("Đã chặn")
+                            .font(.system(size: 10, weight: .bold))
+                            .lineLimit(1)
+                            .foregroundStyle(MeshTheme.sosCrimson)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(MeshTheme.sosCrimson.opacity(0.16), in: Capsule())
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            .padding(.bottom, 14)
 
             if peer.trustState == .keyConflict {
                 HStack(spacing: 8) {
@@ -92,6 +94,7 @@ public struct NodeDetailCard: View {
                         Text("Nghi vấn trạm bị tấn công giả mạo (MITM). Hãy quét QR xác thực.")
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(MeshTheme.primaryText)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer()
                     Button("Xác thực") {
@@ -99,45 +102,27 @@ public struct NodeDetailCard: View {
                     }
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
                     .background(MeshTheme.sosCrimson, in: Capsule())
+                    .contentShape(Capsule())
+                    .buttonStyle(.applePressable)
                 }
                 .padding(10)
-                .background(MeshTheme.sosCrimson.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                .background(MeshTheme.sosCrimson.opacity(0.15), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .padding(.horizontal, 16)
-                .padding(.bottom, 6)
+                .padding(.bottom, 10)
             }
 
             Divider()
                 .overlay(MeshTheme.hairlineBorder)
                 .padding(.leading, 16)
 
-            // MARK: 2. Clean Flat Property Rows (No AI Slop Boxes)
+            // MARK: 2. Clean Flat Property Rows
             VStack(spacing: 0) {
                 propertyRow(
-                    icon: "person.fill",
-                    title: "Tên trạm (Name)",
-                    value: peer.identity.displayName
-                )
-
-                Divider()
-                    .overlay(MeshTheme.hairlineBorder)
-                    .padding(.leading, 44)
-
-                propertyRow(
-                    icon: "number",
-                    title: "Định danh (Node ID)",
-                    value: peer.identity.nodeID
-                )
-
-                Divider()
-                    .overlay(MeshTheme.hairlineBorder)
-                    .padding(.leading, 44)
-
-                propertyRow(
                     icon: "arrow.triangle.branch",
-                    title: "Lộ trình (Route)",
+                    title: "Lộ trình",
                     value: routeDescription
                 )
 
@@ -153,9 +138,9 @@ public struct NodeDetailCard: View {
                 .overlay(MeshTheme.hairlineBorder)
                 .padding(.leading, 16)
 
-            // MARK: 3. Collapsible Action Pill ("Thao tác với trạm ⌄")
-            collapsibleActionSection
-                .padding(14)
+            // MARK: 3. Direct Apple Contacts-Style Action Section
+            actionSection
+                .padding(16)
         }
         .background(MeshTheme.cardSurface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .sensoryFeedback(.impact(weight: .light), trigger: pingFeedbackCount)
@@ -222,6 +207,43 @@ public struct NodeDetailCard: View {
         return peer.linkKind == .offlineDTN ? "DTN" : "P2P"
     }
 
+    private var signalColor: Color {
+        if peer.linkKind == .offlineDTN {
+            return MeshTheme.dtnIndigo
+        }
+        if signalQualityPercent >= 80 {
+            return MeshTheme.emerald
+        }
+        if signalQualityPercent >= 50 {
+            return MeshTheme.meshAmber
+        }
+        return MeshTheme.sosCrimson
+    }
+
+    private var signalRingView: some View {
+        ZStack {
+            Circle()
+                .stroke(signalColor.opacity(0.18), lineWidth: 5)
+
+            Circle()
+                .trim(from: 0, to: min(max(signalQualityPercent / 100.0, 0), 1))
+                .stroke(signalColor, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+
+            VStack(spacing: 0) {
+                Text("\(Int(signalQualityPercent))%")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(MeshTheme.primaryText)
+                Text(latencyLabel)
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(MeshTheme.secondaryText)
+            }
+        }
+        .frame(width: 56, height: 56)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Tín hiệu \(Int(signalQualityPercent)) phần trăm, \(latencyLabel)")
+    }
+
     private var routeDescription: String {
         switch peer.linkKind {
         case .directP2P:
@@ -248,12 +270,13 @@ public struct NodeDetailCard: View {
                 .font(.system(size: 14, weight: .regular))
                 .foregroundStyle(MeshTheme.secondaryText)
 
-            Spacer()
+            Spacer(minLength: 12)
 
             Text(value)
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(MeshTheme.primaryText)
                 .lineLimit(1)
+                .truncationMode(.middle)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -266,17 +289,18 @@ public struct NodeDetailCard: View {
                 .foregroundStyle(MeshTheme.emerald)
                 .frame(width: 20)
 
-            Text("Khóa công khai (Key)")
+            Text("Khóa công khai")
                 .font(.system(size: 14, weight: .regular))
                 .foregroundStyle(MeshTheme.secondaryText)
 
-            Spacer()
+            Spacer(minLength: 12)
 
             HStack(spacing: 8) {
                 Text(peer.identity.publicKeyFingerprint ?? "E2EE-Active")
                     .font(.system(size: 13, weight: .bold, design: .monospaced))
                     .foregroundStyle(MeshTheme.primaryText)
                     .lineLimit(1)
+                    .truncationMode(.middle)
 
                 Button {
                     copyPublicKey()
@@ -288,124 +312,104 @@ public struct NodeDetailCard: View {
                             .font(.system(size: 11, weight: .bold))
                     }
                     .foregroundStyle(MeshTheme.emerald)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
                     .background(MeshTheme.emerald.opacity(0.14), in: Capsule())
+                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.applePressable)
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
     }
 
-    private var collapsibleActionSection: some View {
+    private var actionSection: some View {
         VStack(spacing: 10) {
+            // Primary CTA: Encrypted Chat
             Button {
-                withAnimation(.spring(response: 0.32, dampingFraction: 0.8)) {
-                    isActionsExpanded.toggle()
+                withAnimation(MeshTheme.fluidSpring) {
+                    coordinator.openDirectConversation(with: peer.id)
                 }
             } label: {
-                HStack {
-                    Text(isActionsExpanded ? "Thu gọn thao tác" : "Thao tác với trạm (Ping / Nhắn tin / Chặn)")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(MeshTheme.primaryText)
-
-                    Spacer()
-
-                    Image(systemName: isActionsExpanded ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(MeshTheme.secondaryText)
-                }
-                .padding(.horizontal, 14)
-                .frame(height: 38)
-                .background(MeshTheme.elevatedSurface, in: Capsule())
+                Label("Nhắn tin mã hóa", systemImage: "bubble.left.and.lock.fill")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(Color.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 46)
+                    .background(MeshTheme.emeraldDark, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.applePressable)
 
-            if isActionsExpanded {
-                HStack(spacing: 8) {
-                    // Ping RTT Button
-                    Button {
-                        pingFeedbackCount += 1
-                        coordinator.ping(peerID: peer.id)
-                    } label: {
-                        Label("Ping", systemImage: "waveform.path.ecg")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(MeshTheme.primaryText)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 38)
-                            .background(MeshTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(peer.linkKind == .offlineDTN)
-                    .opacity(peer.linkKind == .offlineDTN ? 0.45 : 1.0)
-
-                    // Encrypted Chat Button
-                    Button {
-                        withAnimation {
-                            coordinator.openDirectConversation(with: peer.id)
-                        }
-                    } label: {
-                        Label("Nhắn tin", systemImage: "bubble.left.and.lock.fill")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(Color.white)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 38)
-                            .background(MeshTheme.emerald, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-
-                    // Sever / Unblock 1-Hop Route
-                    Button {
-                        withAnimation {
-                            coordinator.toggleTopologyBlock(for: peer.id)
-                        }
-                    } label: {
-                        Label(isBlocked ? "Bỏ chặn" : "Chặn", systemImage: isBlocked ? "checkmark.circle" : "slash.circle")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(isBlocked ? MeshTheme.emerald : MeshTheme.sosCrimson)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 38)
-                            .background(
-                                (isBlocked ? MeshTheme.emerald : MeshTheme.sosCrimson).opacity(0.14),
-                                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            )
-                    }
-                    .buttonStyle(.plain)
+            // Secondary Quick Actions Grid (Apple Contacts style)
+            HStack(spacing: 8) {
+                quickActionTile(
+                    title: "Ping",
+                    systemImage: "waveform.path.ecg",
+                    iconColor: MeshTheme.emerald,
+                    isDisabled: peer.linkKind == .offlineDTN
+                ) {
+                    pingFeedbackCount += 1
+                    coordinator.ping(peerID: peer.id)
                 }
 
-                HStack(spacing: 8) {
-                    // Precision Finding Compass Button
-                    Button {
-                        coordinator.startHeadingUpdates()
-                        showingCompassSheet = true
-                    } label: {
-                        Label("Dò vị trí", systemImage: "location.north.circle.fill")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(MeshTheme.emerald)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 38)
-                            .background(MeshTheme.emerald.opacity(0.14), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-
-                    // QR Verification Button
-                    Button {
-                        showingQRSheet = true
-                    } label: {
-                        Label("Mã QR", systemImage: "qrcode.viewfinder")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(MeshTheme.meshCyan)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 38)
-                            .background(MeshTheme.meshCyan.opacity(0.14), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
+                quickActionTile(
+                    title: "Dò vị trí",
+                    systemImage: "location.north.circle.fill",
+                    iconColor: MeshTheme.emerald
+                ) {
+                    coordinator.startHeadingUpdates()
+                    showingCompassSheet = true
                 }
-                .transition(.opacity.combined(with: .move(edge: .top)))
+
+                quickActionTile(
+                    title: "Mã QR",
+                    systemImage: "qrcode.viewfinder",
+                    iconColor: MeshTheme.emerald
+                ) {
+                    showingQRSheet = true
+                }
+
+                quickActionTile(
+                    title: isBlocked ? "Bỏ chặn" : "Chặn",
+                    systemImage: isBlocked ? "checkmark.circle" : "slash.circle",
+                    iconColor: isBlocked ? MeshTheme.emerald : MeshTheme.sosCrimson
+                ) {
+                    withAnimation(MeshTheme.fluidSpring) {
+                        coordinator.toggleTopologyBlock(for: peer.id)
+                    }
+                }
             }
         }
+    }
+
+    private func quickActionTile(
+        title: String,
+        systemImage: String,
+        iconColor: Color,
+        isDisabled: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(spacing: 5) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(iconColor)
+
+                Text(title)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(MeshTheme.primaryText)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 58)
+            .background(MeshTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.applePressable)
+        .disabled(isDisabled)
+        .opacity(isDisabled ? 0.42 : 1.0)
     }
 
     private func copyPublicKey() {
